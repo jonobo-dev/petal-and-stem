@@ -9775,10 +9775,11 @@ function CartView({
   return (
     <div className="fade-in" style={{ paddingBottom: cartHasItems ? '160px' : '20px' }}>
       <div className="build-grid">
-        {/* DOM order: side first (so mobile sees customer/summary up top),
-            picker second. On desktop the grid swaps them: picker left, side right. */}
-        <div className="build-side">{SideColumn}</div>
+        {/* DOM order: picker first (so mobile sees the flower list right
+            away — cart + summary stack below). Desktop grid uses explicit
+            grid-column assignments, so column placement is unaffected. */}
         <div className="build-picker">{PickerColumn}</div>
+        <div className="build-side">{SideColumn}</div>
       </div>
 
       {cartHasItems && (
