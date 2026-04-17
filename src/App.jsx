@@ -1994,6 +1994,30 @@ export default function App() {
           }
           /* Lift the scroll-to-top FAB above the Build sticky footer. */
           .fab-top { bottom: 100px !important; }
+          /* Calendar: tighten padding and cell text so 7 days fit comfortably. */
+          .cal-wrap { padding: 10px !important; }
+          .cal-day { padding: 2px 1px !important; }
+          .cal-day-num { font-size: 12px !important; }
+          .cal-day-time { font-size: 8px !important; margin-top: 1px !important; }
+        }
+
+        /* Ultra-narrow tier for the smallest phones (iPhone SE 1st-gen and
+           below, old Androids). Falls back gracefully from the 500px tier. */
+        @media (max-width: 380px) {
+          .app-header { padding: 14px 10px 8px !important; }
+          .app-tabs { padding: 0 10px 10px !important; }
+          .app-main { padding: 12px 10px !important; }
+          .tab-btn {
+            font-size: 11px !important;
+            padding: 9px 2px !important;
+            letter-spacing: -0.01em !important;
+          }
+          .card-thumb { width: 56px !important; }
+          .build-sub-tabs button { font-size: 11px !important; padding: 7px 2px !important; }
+          /* Calendar at this width: drop the time label entirely, just the dot. */
+          .cal-wrap { padding: 8px !important; }
+          .cal-day-num { font-size: 11px !important; }
+          .cal-day-time { display: none !important; }
         }
       `}</style>
 
@@ -3917,7 +3941,7 @@ function OrdersView({ orders, settings, upcomingCount, focusOrderId, onClearFocu
         )}
       </div>
 
-      <div style={{
+      <div className="cal-wrap" style={{
         background: C.card, border: `1px solid ${C.borderSoft}`, borderRadius: '14px',
         padding: '16px', marginBottom: '16px',
       }}>
@@ -4022,7 +4046,7 @@ function OrdersView({ orders, settings, upcomingCount, focusOrderId, onClearFocu
                     pointerEvents: 'none',
                   }} />
                 )}
-                <div style={{
+                <div className="cal-day-num" style={{
                   fontSize: '13px', fontWeight: hasOrders || isToday || isSelected ? 700 : 500, lineHeight: 1,
                   color: isToday && !isSelected ? C.roseDeep : undefined,
                   position: 'relative',
@@ -4041,7 +4065,7 @@ function OrdersView({ orders, settings, upcomingCount, focusOrderId, onClearFocu
                   </div>
                 )}
                 {hasOrders && (
-                  <div style={{
+                  <div className="cal-day-time" style={{
                     fontSize: '9px', fontWeight: 600, marginTop: '2px', lineHeight: 1,
                     letterSpacing: '0.02em',
                     color: isSelected ? C.card : C.inkSoft,
