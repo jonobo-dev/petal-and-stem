@@ -2398,7 +2398,7 @@ function OnboardingModal({ settings, onSave, onDone }) {
           <input type="text" value={name} autoFocus
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') saveName(); }}
-            placeholder="e.g. Enchanted Phlorals"
+            placeholder="e.g. Rosie's Flowers"
             maxLength={40}
             style={{
               width: '100%', padding: '12px 14px', fontSize: '16px', fontFamily: 'inherit',
@@ -3215,7 +3215,7 @@ function SettingsModal({
           <Field label="Business name" hint="Shown in the header and on calendar exports.">
             <input className="text-input" type="text" value={draft.businessName}
               onChange={(e) => updateDraft({ businessName: e.target.value })}
-              placeholder="e.g. Enchanted Phlorals" maxLength={40} style={inputStyle()} />
+              placeholder="e.g. Rosie's Flowers" maxLength={40} style={inputStyle()} />
           </Field>
         </CollapsibleSection>
 

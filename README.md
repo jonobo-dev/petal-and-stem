@@ -130,7 +130,7 @@ Run `npm run dev` again. Open the app, tap the gear icon (Settings). Scroll down
 
 A Google sign-in popup appears. Sign in with the **test user account you added in step 2.3** (your aunt's Gmail, or your own if you also added yourself). You'll see a scary "Google hasn't verified this app" warning — click **Advanced → Go to Petal & Stem (unsafe)**. This is normal and only happens once per device.
 
-Approve the permissions. Back in the app, you should see "Connected ✓ — Last synced just now". Open your Drive in another tab — there should be a new spreadsheet called "Enchanted Phlorals — Ledger" with all the data.
+Approve the permissions. Back in the app, you should see "Connected ✓ — Last synced just now". Open your Drive in another tab — there should be a new spreadsheet called "Petal & Stem — Ledger" (or whatever business name is set) with all the data.
 
 If that worked, you're done with the hardest part.
 
