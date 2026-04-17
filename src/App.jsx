@@ -111,76 +111,14 @@ const daysAhead = (n, hour = 14, minute = 0) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const SEED_FLOWERS = [
-  { id: 'seed-1', name: 'Roses', mode: 'perStem', bunchPrice: 12, bunchCount: 12,
-    description: 'Classic cupped blooms with layered petals on thorny stems. The most requested wedding flower, with hundreds of varieties across every color except true blue.',
-    priceHistory: [
-      { date: daysAgo(2), bunchPrice: 12, bunchCount: 12, note: "TJ Brookside" },
-      { date: daysAgo(9), bunchPrice: 9.99, bunchCount: 12, note: "TJ Brookside" },
-      { date: daysAgo(16), bunchPrice: 12.99, bunchCount: 12, note: "TJ Tulsa Hills" },
-    ]
-  },
-  { id: 'seed-2', name: 'Hydrangeas', mode: 'perStem', bunchPrice: 15, bunchCount: 3,
-    description: 'Large, ball-shaped flower heads made of many tiny blooms. Big visual impact — one stem fills a lot of space in an arrangement.', priceHistory: [] },
-  { id: 'seed-3', name: "Baby's Breath", mode: 'flat', flatMin: 5, flatMax: 7,
-    description: 'Tiny white flowers on airy, branching stems. A soft filler that makes bouquets feel fuller and more romantic.', priceHistory: [] },
-  { id: 'seed-4', name: 'Eucalyptus', mode: 'flat', flatMin: 5, flatMax: 7,
-    description: 'Fragrant silvery-green leaves on slender stems. Adds texture and a fresh scent to arrangements.', priceHistory: [] },
-];
-
-const SEED_MATERIALS = [
-  { id: 'mat-1', name: 'Cellophane wrap', type: 'wrapping', color: '#FFFFFF', unitPrice: 0.5, note: 'Clear, glossy finish' },
-  { id: 'mat-2', name: 'Kraft paper', type: 'wrapping', color: '#C4A57B', unitPrice: 0.75, note: 'Natural, brown' },
-  { id: 'mat-3', name: 'Satin ribbon', type: 'ribbon', color: '#F5E6D3', unitPrice: 1.5, note: 'Cream, 1.5" wide' },
-  { id: 'mat-4', name: 'Sheer organza', type: 'ribbon', color: '#C8CBD0', unitPrice: 2, note: 'Silver, silky translucent' },
-];
-
-const SEED_SHOPPING = [
-  {
-    id: 'shop-seed-1',
-    name: 'Weekly TJ run',
-    storeTags: ['TJ Brookside'],
-    items: [
-      { id: 'si-1', label: 'Roses', qty: 4, unit: 'bunches', checked: false },
-      { id: 'si-2', label: 'Hydrangeas', qty: 2, unit: 'bunches', checked: false },
-      { id: 'si-3', label: 'Eucalyptus', qty: 3, unit: 'bunches', checked: true },
-    ],
-    status: 'active',
-    notes: '',
-    createdAt: daysAgo(0),
-    completedAt: null,
-  },
-];
-
-const SEED_BOUQUETS = [
-  {
-    id: 'bq-1', name: 'Spring market mix',
-    fixedPrice: 35, imageUrl: '',
-    items: [
-      { kind: 'flower', id: 'seed-1', qty: 6, included: true },
-      { kind: 'flower', id: 'seed-2', qty: 1, included: true },
-      { kind: 'flower', id: 'seed-3', qty: 1, included: true },
-      { kind: 'material', id: 'mat-2', qty: 1, included: true },
-    ],
-    createdAt: daysAgo(7),
-  },
-  {
-    id: 'bq-2', name: 'Classic rose dozen',
-    fixedPrice: 45, imageUrl: '',
-    items: [
-      { kind: 'flower', id: 'seed-1', qty: 12, included: true },
-      { kind: 'flower', id: 'seed-3', qty: 1, included: true },
-      { kind: 'material', id: 'mat-3', qty: 1, included: true },
-    ],
-    createdAt: daysAgo(14),
-  },
-];
-
-const SEED_ORDERS = [
-  { id: 'ord-1', customerName: 'Sarah Chen', arrangement: 'Mixed spring bouquet', quantity: 2, costPer: 35, paymentMethod: 'venmo', pickupDateTime: daysAhead(2, 14, 0), paid: true, notes: 'Her sister\'s birthday', enableReminders: true, createdAt: daysAgo(1) },
-  { id: 'ord-2', customerName: 'Maria Lopez', arrangement: 'Easter basket', quantity: 1, costPer: 45, paymentMethod: 'cash', pickupDateTime: daysAhead(5, 10, 30), paid: false, notes: '', enableReminders: true, createdAt: daysAgo(0) },
-  { id: 'ord-3', customerName: 'Jen Park', arrangement: 'Rose bouquet', quantity: 3, costPer: 30, paymentMethod: 'paypal', pickupDateTime: daysAgo(5).slice(0, 16), paid: true, notes: 'Delivered to office', enableReminders: true, createdAt: daysAgo(10) },
-];
+// Seeds intentionally empty — a fresh install lands on empty tabs with
+// the built-in empty-state nudges ("Your garden is empty" etc). The
+// app's owner adds her own flowers, supplies, bouquets, and orders.
+const SEED_FLOWERS = [];
+const SEED_MATERIALS = [];
+const SEED_SHOPPING = [];
+const SEED_BOUQUETS = [];
+const SEED_ORDERS = [];
 
 async function fetchWikipedia(name) {
   const title = encodeURIComponent(name.trim());
