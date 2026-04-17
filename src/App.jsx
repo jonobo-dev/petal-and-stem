@@ -272,6 +272,68 @@ function downloadICS(orders, settings, filename) {
 function buildExport(flowers, materials, orders, settings) {
   return { app: 'petal-and-stem', version: 5, exportedAt: new Date().toISOString(), flowers, materials, orders, settings };
 }
+
+// ─── Order schema migration (v5+) ───
+// Legacy orders had: paymentMethod: string, paid: bool, cardMessage: string
+// New orders have:   payments: [{id, method, amount, paid, paidAt?}],
+//                    cardMessages: string[]
+// Migration is idempotent; on reload it's a no-op once orders are upgraded.
+
+function migrateOrder(order) {
+  if (!order) return order;
+  let changed = false;
+  let next = order;
+
+  if (!Array.isArray(order.payments)) {
+    const total = (Number(order.quantity) || 0) * (Number(order.costPer) || 0);
+    const method = order.paymentMethod || 'cash';
+    const paid = !!order.paid;
+    next = {
+      ...next,
+      payments: total > 0 || method
+        ? [{
+            id: `pay-mig-${order.id || Math.random().toString(36).slice(2)}`,
+            method, amount: total, paid,
+            paidAt: paid ? (order.createdAt || new Date().toISOString()) : null,
+          }]
+        : [],
+    };
+    changed = true;
+  }
+  if (!Array.isArray(order.cardMessages)) {
+    const single = (order.cardMessage || '').trim();
+    next = { ...next, cardMessages: single ? [single] : [] };
+    changed = true;
+  }
+  return changed ? next : order;
+}
+
+function migrateOrders(orders) {
+  if (!Array.isArray(orders)) return [];
+  return orders.map(migrateOrder);
+}
+
+// Helpers for deriving order state from its payments array. The UI
+// avoids reading `order.paid` directly so partial payments display
+// correctly; use these instead.
+function orderTotal(order) {
+  return (Number(order.quantity) || 0) * (Number(order.costPer) || 0);
+}
+function paymentsTotal(order) {
+  return (order.payments || []).reduce((s, p) => s + (p.paid ? (Number(p.amount) || 0) : 0), 0);
+}
+function orderPaidState(order) {
+  const payments = order.payments || [];
+  if (payments.length === 0) return order.paid ? 'paid' : 'unpaid';
+  const total = orderTotal(order);
+  const paid = paymentsTotal(order);
+  if (paid <= 0) return 'unpaid';
+  if (paid + 0.001 >= total) return 'paid';
+  return 'partial';
+}
+function outstandingBalance(order) {
+  return Math.max(0, orderTotal(order) - paymentsTotal(order));
+}
 function validateImport(data) {
   if (!data || typeof data !== 'object') return { ok: false, error: 'File is not valid data.' };
   if (!Array.isArray(data.flowers)) return { ok: false, error: 'No flowers found in this file.' };
@@ -338,7 +400,7 @@ export default function App() {
   const [materialForm, setMaterialForm] = useState({ name: '', type: 'ribbon', color: '#F5E6D3', unitPrice: '', note: '', storeTags: [], imageUrl: '', imagePosition: '50% 50%', imageZoom: 1 });
   const [orderForm, setOrderForm] = useState({
     customerName: '', arrangement: '', quantity: '1', costPer: '',
-    paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '',
+    paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [],
     eventType: 'general',
     enableReminders: true,
     items: [], extraCosts: [],
@@ -563,7 +625,7 @@ export default function App() {
     } catch (e) { setMaterials(SEED_MATERIALS); }
     try {
       const r = await storage.get('orders_v1');
-      if (r?.value) setOrders(JSON.parse(r.value));
+      if (r?.value) setOrders(migrateOrders(JSON.parse(r.value)));
       else { setOrders(SEED_ORDERS); await storage.set('orders_v1', JSON.stringify(SEED_ORDERS)).catch(() => {}); }
     } catch (e) { setOrders(SEED_ORDERS); }
     try {
@@ -703,7 +765,7 @@ export default function App() {
     if (!validation.ok) return validation;
     await saveFlowers(data.flowers);
     await saveMaterials(Array.isArray(data.materials) ? data.materials : []);
-    await saveOrders(Array.isArray(data.orders) ? data.orders : []);
+    await saveOrders(migrateOrders(Array.isArray(data.orders) ? data.orders : []));
     if (data.settings) await saveSettings({ ...DEFAULT_SETTINGS, ...data.settings });
     await saveCart({ customerName: '', items: [], customerPrice: '', extraCosts: [], discount: null });
     setExpandedHistory({});
@@ -1028,7 +1090,7 @@ export default function App() {
   const resetOrderForm = () => {
     setOrderForm({
       customerName: '', arrangement: '', quantity: '1', costPer: '',
-      paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '',
+      paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [],
       eventType: 'general',
       enableReminders: settings.remindersDefault,
       items: [], extraCosts: [],
@@ -1112,7 +1174,7 @@ export default function App() {
       customerName: cart.customerName.trim(), arrangement: arrangementText,
       quantity: '1', costPer: costPerStr,
       paymentMethod: 'venmo', pickupDateTime: defaultPickupISO(),
-      paid: false, notes: '', cardMessage: '',
+      paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [],
       eventType: 'general',
       enableReminders: settings.remindersDefault,
       items: editableItems,
@@ -1142,6 +1204,8 @@ export default function App() {
       quantity: o.quantity.toString(), costPer: o.costPer.toString(),
       paymentMethod: o.paymentMethod, pickupDateTime: o.pickupDateTime,
       paid: o.paid, notes: o.notes || '', cardMessage: o.cardMessage || '',
+      cardMessages: Array.isArray(o.cardMessages) ? o.cardMessages.slice() : (o.cardMessage ? [o.cardMessage] : []),
+      payments: Array.isArray(o.payments) ? o.payments.map(p => ({ ...p })) : [],
       eventType: o.eventType || 'general',
       enableReminders: o.enableReminders !== false,
       items: [], extraCosts: [], // legacy fields, unused now (cart is source of truth)
@@ -1168,6 +1232,7 @@ export default function App() {
       quantity: o.quantity.toString(), costPer: o.costPer.toString(),
       paymentMethod: o.paymentMethod, pickupDateTime: freshPickup,
       paid: false, notes: o.notes || '', cardMessage: '',
+      cardMessages: [], payments: [],
       eventType: o.eventType || 'general',
       enableReminders: settings.remindersDefault !== false,
       items: [], extraCosts: [],
@@ -1211,13 +1276,34 @@ export default function App() {
     const cleanExtras = (cart.extraCosts || [])
       .map(e => ({ label: (e.label || '').trim(), amount: parseFloat(e.amount) }))
       .filter(e => e.label && isFinite(e.amount) && e.amount > 0);
+    // Payments + cards come in as the new shape; derive legacy fields
+    // (paymentMethod, paid, cardMessage) from them so Sheets sync, receipts,
+    // stats, and calendar export keep working without schema-aware rewrites.
+    const cleanPayments = (Array.isArray(orderForm.payments) ? orderForm.payments : [])
+      .map(p => ({
+        id: p.id || `pay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        method: p.method || 'cash',
+        amount: Number(p.amount) || 0,
+        paid: !!p.paid,
+        paidAt: p.paid ? (p.paidAt || new Date().toISOString()) : null,
+      }))
+      .filter(p => p.amount > 0 || p.paid);
+    const cleanCards = (Array.isArray(orderForm.cardMessages) ? orderForm.cardMessages : [])
+      .map(m => (m || '').trim()).filter(Boolean);
+    const totalForLegacy = qty * costPer;
+    const paidSum = cleanPayments.reduce((s, p) => s + (p.paid ? p.amount : 0), 0);
+    const fullyPaid = cleanPayments.length > 0 && paidSum + 0.001 >= totalForLegacy;
+    const legacyMethod = cleanPayments[0]?.method || orderForm.paymentMethod || 'cash';
+
     const entry = {
       id: editingOrderId || `ord-${Date.now()}`,
       customerName, arrangement: (orderForm.arrangement || '').trim(),
-      quantity: qty, costPer, paymentMethod: orderForm.paymentMethod,
-      pickupDateTime: orderForm.pickupDateTime, paid: orderForm.paid,
+      quantity: qty, costPer, paymentMethod: legacyMethod,
+      pickupDateTime: orderForm.pickupDateTime, paid: cleanPayments.length > 0 ? fullyPaid : !!orderForm.paid,
       notes: (orderForm.notes || '').trim() || undefined,
-      cardMessage: (orderForm.cardMessage || '').trim() || undefined,
+      cardMessage: cleanCards[0] || undefined,
+      cardMessages: cleanCards.length > 0 ? cleanCards : undefined,
+      payments: cleanPayments.length > 0 ? cleanPayments : undefined,
       eventType: orderForm.eventType || 'general',
       enableReminders: orderForm.enableReminders,
       items: snapshot.length > 0 ? snapshot : undefined,
@@ -1248,7 +1334,34 @@ export default function App() {
     saveOrders(orders.filter(x => x.id !== id));
     queueUndo(`Deleted order for ${o.customerName || 'customer'}`, () => saveOrders(prevOrders));
   };
-  const toggleOrderPaid = (id) => saveOrders(orders.map(o => o.id === id ? { ...o, paid: !o.paid } : o));
+  // Quick one-tap toggle. If the order has a payments array, we flip every
+  // payment's paid flag to match the target state — "fully paid" becomes
+  // "all unpaid" and vice versa. For legacy orders (no payments array)
+  // it's a simple boolean flip.
+  const toggleOrderPaid = (id) => saveOrders(orders.map(o => {
+    if (o.id !== id) return o;
+    const payments = Array.isArray(o.payments) ? o.payments : [];
+    if (payments.length === 0) return { ...o, paid: !o.paid };
+    const nowPaid = !o.paid;
+    const nowISO = new Date().toISOString();
+    const totalAmount = (Number(o.quantity) || 0) * (Number(o.costPer) || 0);
+    const currentSum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    // If marking paid but payments don't sum to the order total, top up the
+    // last payment so the order closes out cleanly. (Partial balance of a
+    // side-entered payment shouldn't block "mark paid" on the card.)
+    let nextPayments = payments.map(p => ({
+      ...p, paid: nowPaid,
+      paidAt: nowPaid ? (p.paidAt || nowISO) : null,
+    }));
+    if (nowPaid && currentSum + 0.001 < totalAmount && nextPayments.length > 0) {
+      const last = nextPayments[nextPayments.length - 1];
+      nextPayments[nextPayments.length - 1] = {
+        ...last,
+        amount: Number(last.amount) + (totalAmount - currentSum),
+      };
+    }
+    return { ...o, paid: nowPaid, payments: nextPayments };
+  }));
 
   // --- Bouquets ---
   const resetBouquetForm = () => {
@@ -2806,6 +2919,154 @@ function TabButton({ active, onClick, label, badge }) {
         }}>{badge}</span>
       )}
     </button>
+  );
+}
+
+// Editor for split payments — method + amount + paid toggle per row.
+// Order total and outstanding balance are derived on the fly so she can
+// see exactly how much is still owed without doing math in her head.
+function PaymentsEditor({ payments, onChange, total, paymentMethods }) {
+  const rows = Array.isArray(payments) ? payments : [];
+  const paid = rows.reduce((s, p) => s + (p.paid ? (Number(p.amount) || 0) : 0), 0);
+  const allPaidAmount = rows.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const outstanding = Math.max(0, (Number(total) || 0) - paid);
+
+  const updateRow = (i, patch) => {
+    const next = rows.map((r, idx) => idx === i ? { ...r, ...patch } : r);
+    onChange(next);
+  };
+  const removeRow = (i) => onChange(rows.filter((_, idx) => idx !== i));
+  const addRow = () => {
+    const remaining = (Number(total) || 0) - allPaidAmount;
+    const suggested = remaining > 0.005 ? Math.round(remaining * 100) / 100 : 0;
+    onChange([
+      ...rows,
+      { id: `pay-${Date.now()}-${rows.length}`, method: rows[0]?.method || (paymentMethods[0]?.key || 'cash'), amount: suggested, paid: false, paidAt: null },
+    ]);
+  };
+
+  return (
+    <div>
+      {rows.length === 0 && (
+        <div style={{
+          padding: '12px', background: C.bg, border: `1px dashed ${C.border}`,
+          borderRadius: '8px', fontSize: '12px', color: C.inkFaint, marginBottom: '8px',
+          fontStyle: 'italic',
+        }}>No payments yet. Tap + to add one.</div>
+      )}
+      {rows.map((row, i) => (
+        <div key={row.id || i} style={{
+          display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px',
+          padding: '10px', background: C.bg, border: `1px solid ${C.borderSoft}`, borderRadius: '10px',
+        }}>
+          <TypeDropdown
+            value={row.method || 'cash'} options={paymentMethods}
+            onChange={(key) => updateRow(i, { method: key })}
+            showColor placeholder="Method"
+          />
+          <div style={{ position: 'relative', flex: '0 0 95px' }}>
+            <span style={{
+              position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)',
+              fontSize: '13px', color: C.inkFaint, pointerEvents: 'none',
+            }}>$</span>
+            <input className="text-input" type="number" inputMode="decimal" step="0.01" min="0"
+              value={row.amount ?? ''}
+              onChange={(e) => updateRow(i, { amount: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+              placeholder="0.00"
+              style={{ ...inputStyle(), padding: '8px 8px 8px 22px', fontSize: '13px', width: '100%' }} />
+          </div>
+          <button onClick={() => updateRow(i, {
+            paid: !row.paid,
+            paidAt: !row.paid ? new Date().toISOString() : null,
+          })}
+            aria-label={row.paid ? 'Mark unpaid' : 'Mark paid'}
+            style={{
+              width: '36px', height: '36px', borderRadius: '8px',
+              background: row.paid ? C.sageDeep : C.card,
+              border: `1.5px solid ${row.paid ? C.sageDeep : C.border}`,
+              cursor: 'pointer', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+            {row.paid && <Check size={16} strokeWidth={2.4} color={C.card} />}
+          </button>
+          <button onClick={() => removeRow(i)} aria-label="Remove payment" style={{
+            background: 'transparent', border: 'none', padding: '6px',
+            cursor: 'pointer', color: C.inkFaint, flexShrink: 0,
+          }}><X size={14} /></button>
+        </div>
+      ))}
+      <button onClick={addRow} style={{
+        padding: '8px 12px', background: 'transparent',
+        border: `1px dashed ${C.border}`, borderRadius: '8px',
+        color: C.inkSoft, fontFamily: 'inherit', fontSize: '12px',
+        fontWeight: 500, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
+      }}><Plus size={13} strokeWidth={2} /> Add payment</button>
+      {rows.length > 0 && (
+        <div style={{
+          marginTop: '10px', padding: '8px 12px',
+          background: outstanding > 0.005 ? `${C.gold}22` : `${C.sage}22`,
+          border: `1px solid ${outstanding > 0.005 ? C.gold : C.sageDeep}44`,
+          borderRadius: '8px', fontSize: '12px', color: C.inkSoft,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+        }}>
+          <span>Paid: <strong style={{ color: C.ink }}>${paid.toFixed(2)}</strong> of ${(Number(total) || 0).toFixed(2)}</span>
+          {outstanding > 0.005 && (
+            <span style={{ color: C.gold, fontWeight: 600 }}>
+              ${outstanding.toFixed(2)} outstanding
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Editor for multiple card messages — one textarea per note card, with
+// + to add another and × to remove. Empty cards are fine in the editor;
+// submitOrderForm filters them before saving.
+function CardMessagesEditor({ cardMessages, onChange }) {
+  const rows = Array.isArray(cardMessages) ? cardMessages : [];
+  const updateRow = (i, v) => onChange(rows.map((m, idx) => idx === i ? v : m));
+  const removeRow = (i) => onChange(rows.filter((_, idx) => idx !== i));
+  const addRow = () => onChange([...rows, '']);
+  return (
+    <div>
+      {rows.length === 0 && (
+        <div style={{
+          padding: '12px', background: C.bg, border: `1px dashed ${C.border}`,
+          borderRadius: '8px', fontSize: '12px', color: C.inkFaint, marginBottom: '8px',
+          fontStyle: 'italic',
+        }}>No card messages. Tap + to add one.</div>
+      )}
+      {rows.map((msg, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '8px',
+        }}>
+          <div style={{
+            fontSize: '10px', fontWeight: 600, color: C.inkFaint,
+            padding: '10px 4px 0 2px', minWidth: '36px', letterSpacing: '0.04em',
+            textAlign: 'right', flexShrink: 0,
+          }}>Card {i + 1}</div>
+          <textarea className="text-input" value={msg}
+            onChange={(e) => updateRow(i, e.target.value)}
+            placeholder="What should the card say?"
+            rows={2}
+            style={{ ...inputStyle(), fontSize: '13px', minHeight: '52px', resize: 'vertical', flex: 1 }} />
+          <button onClick={() => removeRow(i)} aria-label="Remove card" style={{
+            background: 'transparent', border: 'none', padding: '10px 6px',
+            cursor: 'pointer', color: C.inkFaint, flexShrink: 0,
+          }}><X size={14} /></button>
+        </div>
+      ))}
+      <button onClick={addRow} style={{
+        padding: '8px 12px', background: 'transparent',
+        border: `1px dashed ${C.border}`, borderRadius: '8px',
+        color: C.inkSoft, fontFamily: 'inherit', fontSize: '12px',
+        fontWeight: 500, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
+      }}><Plus size={13} strokeWidth={2} /> Add card</button>
+    </div>
   );
 }
 
@@ -4381,6 +4642,17 @@ function OrderCard({ order, settings, highlighted, onEdit, onDuplicate, onDelete
   const total = Math.max(0, subtotalRaw - discAmount);
   const paymentList = (settings && settings.paymentMethods) || PAYMENT_METHODS;
   const payment = paymentList.find(p => p.key === order.paymentMethod) || paymentList[paymentList.length - 1];
+  // Split-payment aware status. Falls back to legacy `order.paid` if the
+  // order hasn't been migrated yet.
+  const payments = Array.isArray(order.payments) ? order.payments : [];
+  const paidSum = payments.reduce((s, p) => s + (p.paid ? (Number(p.amount) || 0) : 0), 0);
+  const paidState = payments.length > 0
+    ? (paidSum <= 0 ? 'unpaid' : (paidSum + 0.001 >= total ? 'paid' : 'partial'))
+    : (order.paid ? 'paid' : 'unpaid');
+  const outstanding = Math.max(0, total - paidSum);
+  const cardMessages = Array.isArray(order.cardMessages) && order.cardMessages.length > 0
+    ? order.cardMessages
+    : (order.cardMessage ? [order.cardMessage] : []);
   const eventTypes = (settings && settings.eventTypes) || DEFAULT_EVENT_TYPES;
   const eventType = eventTypes.find(t => t.key === (order.eventType || 'general'));
   const isPast = new Date(order.pickupDateTime) < new Date();
@@ -4396,8 +4668,15 @@ function OrderCard({ order, settings, highlighted, onEdit, onDuplicate, onDelete
   return (
     <div className="order-card" style={{
       background: C.card,
-      border: `1px solid ${highlighted ? C.sageDeep : order.paid ? C.borderSoft : C.gold}`,
-      boxShadow: highlighted ? `0 0 0 3px ${C.sage}44` : 'none',
+      border: `1px solid ${
+        highlighted ? C.sageDeep
+        : paidState === 'partial' ? C.roseDeep
+        : paidState === 'paid' ? C.borderSoft
+        : C.gold
+      }`,
+      boxShadow: highlighted ? `0 0 0 3px ${C.sage}44`
+        : paidState === 'partial' ? `0 0 0 3px ${C.roseDeep}33`
+        : 'none',
       borderRadius: '12px', padding: '14px 16px',
       opacity: isPast ? 0.78 : 1,
       display: 'flex', flexDirection: 'column', gap: '10px',
@@ -4409,13 +4688,21 @@ function OrderCard({ order, settings, highlighted, onEdit, onDuplicate, onDelete
             <div className="serif" style={{
               fontSize: '18px', fontWeight: 500, letterSpacing: '-0.01em', lineHeight: 1.2,
             }}>{order.customerName}</div>
-            {order.paid ? (
+            {paidState === 'paid' ? (
               <span style={{
                 fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
                 color: C.sageDeep, background: `${C.sage}22`,
                 padding: '2px 7px', borderRadius: '4px',
                 display: 'inline-flex', alignItems: 'center', gap: '3px',
               }}><Check size={10} strokeWidth={3} /> Paid</span>
+            ) : paidState === 'partial' ? (
+              <span style={{
+                fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: C.card, background: C.roseDeep,
+                padding: '2px 7px', borderRadius: '4px',
+                display: 'inline-flex', alignItems: 'center', gap: '3px',
+                boxShadow: `0 0 0 2px ${C.roseDeep}33`,
+              }}><AlertCircle size={10} strokeWidth={2.6} /> ${outstanding.toFixed(2)} owed</span>
             ) : (
               <span style={{
                 fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
@@ -4552,21 +4839,39 @@ function OrderCard({ order, settings, highlighted, onEdit, onDuplicate, onDelete
         </details>
       )}
 
-      {order.cardMessage && (
+      {cardMessages.length > 0 && (
         <div style={{
           padding: '10px 12px', background: `${C.gold}10`, border: `1px dashed ${C.gold}66`,
           borderRadius: '8px',
         }}>
           <div style={{
             fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
-            textTransform: 'uppercase', color: C.gold, marginBottom: '4px',
+            textTransform: 'uppercase', color: C.gold, marginBottom: '6px',
             display: 'flex', alignItems: 'center', gap: '4px',
           }}>
-            <Pencil size={11} strokeWidth={2} /> Card message
+            <Pencil size={11} strokeWidth={2} />
+            {cardMessages.length === 1 ? 'Card message' : `${cardMessages.length} card messages`}
           </div>
-          <div className="italic" style={{
-            fontSize: '14px', color: C.ink, lineHeight: 1.5, whiteSpace: 'pre-wrap',
-          }}>"{order.cardMessage}"</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {cardMessages.map((m, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'flex-start', gap: '8px',
+                paddingTop: i > 0 ? '6px' : 0,
+                borderTop: i > 0 ? `1px dashed ${C.gold}33` : 'none',
+              }}>
+                {cardMessages.length > 1 && (
+                  <div style={{
+                    fontSize: '10px', fontWeight: 700, color: C.gold, letterSpacing: '0.04em',
+                    flexShrink: 0, paddingTop: '2px', minWidth: '20px',
+                  }}>#{i + 1}</div>
+                )}
+                <div className="italic" style={{
+                  fontSize: '14px', color: C.ink, lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap', flex: 1, minWidth: 0,
+                }}>"{m}"</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -4584,14 +4889,16 @@ function OrderCard({ order, settings, highlighted, onEdit, onDuplicate, onDelete
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           <button onClick={() => onTogglePaid(order.id)} style={{
             padding: '6px 12px', fontSize: '12px', fontFamily: 'inherit',
-            background: order.paid ? C.card : C.sageDeep,
-            border: `1px solid ${order.paid ? C.border : C.sageDeep}`,
+            background: paidState === 'paid' ? C.card : C.sageDeep,
+            border: `1px solid ${paidState === 'paid' ? C.border : C.sageDeep}`,
             borderRadius: '8px',
-            color: order.paid ? C.inkSoft : C.card,
+            color: paidState === 'paid' ? C.inkSoft : C.card,
             cursor: 'pointer', fontWeight: 500,
             display: 'flex', alignItems: 'center', gap: '5px',
           }}>
-            {order.paid ? <>Mark unpaid</> : <><Check size={12} strokeWidth={2.4} /> Mark paid</>}
+            {paidState === 'paid' ? <>Mark unpaid</>
+              : paidState === 'partial' ? <><Check size={12} strokeWidth={2.4} /> Mark fully paid</>
+              : <><Check size={12} strokeWidth={2.4} /> Mark paid</>}
           </button>
           {!isPast && (
             <button className="cal-action-btn" onClick={handleCal}
@@ -5759,37 +6066,14 @@ function OrderFormModal({ form, setForm, editingId, settings, flowers, materials
           )}
         </Field>
 
-        <Field label="Payment method">
-          <TypeDropdown
-            value={form.paymentMethod || 'venmo'}
-            options={settings.paymentMethods || DEFAULT_PAYMENT_METHODS}
-            onChange={(key) => setForm({ ...form, paymentMethod: key })}
-            onAdd={onAddPaymentMethod}
-            showColor
-            placeholder="Select payment method…"
+        <Field label="Payments" hint="Add one row per payment. Split across methods if needed.">
+          <PaymentsEditor
+            payments={form.payments || []}
+            onChange={(next) => setForm({ ...form, payments: next })}
+            total={(parseFloat(form.quantity) || 0) * (parseFloat(form.costPer) || 0)}
+            paymentMethods={settings.paymentMethods || DEFAULT_PAYMENT_METHODS}
           />
         </Field>
-
-        <div style={{
-          padding: '12px 14px', background: C.bg, borderRadius: '10px', marginBottom: '14px',
-          cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: '10px',
-        }} onClick={() => setForm({ ...form, paid: !form.paid })}>
-          <div style={{
-            width: '20px', height: '20px', borderRadius: '6px',
-            background: form.paid ? C.sageDeep : C.card,
-            border: `1.5px solid ${form.paid ? C.sageDeep : C.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 160ms ease', flexShrink: 0, marginTop: '1px',
-          }}>
-            {form.paid && <Check size={13} strokeWidth={3} color={C.card} />}
-          </div>
-          <div>
-            <div style={{ fontSize: '14px', fontWeight: 500 }}>Already paid</div>
-            <div style={{ fontSize: '12px', color: C.inkSoft }}>
-              Check this if the customer has already sent payment
-            </div>
-          </div>
-        </div>
 
         <div style={{
           padding: '12px 14px', background: C.bg, borderRadius: '10px', marginBottom: '14px',
@@ -5828,12 +6112,11 @@ function OrderFormModal({ form, setForm, editingId, settings, flowers, materials
             style={{ ...inputStyle(), resize: 'vertical', minHeight: '60px' }} />
         </Field>
 
-        <Field label="Card message (optional)" hint="If the customer wants a note written on a card.">
-          <textarea className="text-input" value={form.cardMessage || ''}
-            onChange={(e) => setForm({ ...form, cardMessage: e.target.value })}
-            placeholder='e.g. "Happy birthday, Mom! Love, Sarah"'
-            rows="3"
-            style={{ ...inputStyle(), resize: 'vertical', minHeight: '70px', fontFamily: '"Playfair Display", serif', fontStyle: 'italic' }} />
+        <Field label="Card messages (optional)" hint="One per bouquet that needs a card. Tap + to add more.">
+          <CardMessagesEditor
+            cardMessages={form.cardMessages || []}
+            onChange={(next) => setForm({ ...form, cardMessages: next })}
+          />
         </Field>
 
         <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
@@ -9609,31 +9892,14 @@ function EditOrderModal({
             />
           </Field>
 
-          <Field label="Payment method">
-            <TypeDropdown
-              value={orderForm.paymentMethod || 'venmo'}
-              options={paymentMethods}
-              onChange={(key) => setOrderForm({ ...orderForm, paymentMethod: key })}
-              onAdd={onAddPaymentMethod}
-              placeholder="Select payment method…"
+          <Field label="Payments" hint="Add one per payment. Split across methods if needed.">
+            <PaymentsEditor
+              payments={orderForm.payments || []}
+              onChange={(next) => setOrderForm({ ...orderForm, payments: next })}
+              total={(parseFloat(orderForm.quantity) || 0) * (parseFloat(orderForm.costPer) || 0)}
+              paymentMethods={paymentMethods}
             />
           </Field>
-
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
-            background: C.bg, borderRadius: '8px', marginBottom: '12px', cursor: 'pointer',
-          }} onClick={() => setOrderForm({ ...orderForm, paid: !orderForm.paid })}>
-            <div style={{
-              width: '20px', height: '20px', borderRadius: '6px',
-              background: orderForm.paid ? C.sageDeep : C.card,
-              border: `1.5px solid ${orderForm.paid ? C.sageDeep : C.border}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 160ms ease', flexShrink: 0,
-            }}>
-              {orderForm.paid && <Check size={13} strokeWidth={3} color={C.card} />}
-            </div>
-            <div style={{ fontSize: '13px', fontWeight: 500, color: C.ink }}>Already paid</div>
-          </div>
 
           <div style={{
             display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
@@ -9664,12 +9930,11 @@ function EditOrderModal({
               style={{ ...inputStyle(), resize: 'vertical', minHeight: '60px' }} />
           </CollapsibleField>
 
-          <CollapsibleField label="Card message (optional)" hint="If the customer wants a note written on a card." value={orderForm.cardMessage}>
-            <textarea className="text-input" value={orderForm.cardMessage || ''}
-              onChange={(e) => setOrderForm({ ...orderForm, cardMessage: e.target.value })}
-              placeholder='e.g. "Happy birthday, Mom! Love, Sarah"'
-              rows="3"
-              style={{ ...inputStyle(), resize: 'vertical', minHeight: '70px', fontFamily: '"Playfair Display", serif', fontStyle: 'italic' }} />
+          <CollapsibleField label="Card messages (optional)" hint="One per bouquet that needs a card. Tap + to add more." value={(orderForm.cardMessages || []).join(' ')}>
+            <CardMessagesEditor
+              cardMessages={orderForm.cardMessages || []}
+              onChange={(next) => setOrderForm({ ...orderForm, cardMessages: next })}
+            />
           </CollapsibleField>
         </div>
 
@@ -10008,31 +10273,14 @@ function CartView({
             />
           </Field>
 
-          <Field label="Payment method">
-            <TypeDropdown
-              value={orderForm.paymentMethod || 'venmo'}
-              options={paymentMethods}
-              onChange={(key) => setOrderForm({ ...orderForm, paymentMethod: key })}
-              onAdd={onAddPaymentMethod}
-              placeholder="Select payment method…"
+          <Field label="Payments" hint="Add one per payment. Split across methods if needed.">
+            <PaymentsEditor
+              payments={orderForm.payments || []}
+              onChange={(next) => setOrderForm({ ...orderForm, payments: next })}
+              total={(parseFloat(orderForm.quantity) || 0) * (parseFloat(orderForm.costPer) || 0)}
+              paymentMethods={paymentMethods}
             />
           </Field>
-
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
-            background: C.bg, borderRadius: '8px', marginBottom: '12px', cursor: 'pointer',
-          }} onClick={() => setOrderForm({ ...orderForm, paid: !orderForm.paid })}>
-            <div style={{
-              width: '20px', height: '20px', borderRadius: '6px',
-              background: orderForm.paid ? C.sageDeep : C.card,
-              border: `1.5px solid ${orderForm.paid ? C.sageDeep : C.border}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 160ms ease', flexShrink: 0,
-            }}>
-              {orderForm.paid && <Check size={13} strokeWidth={3} color={C.card} />}
-            </div>
-            <div style={{ fontSize: '13px', fontWeight: 500, color: C.ink }}>Already paid</div>
-          </div>
 
           <div style={{
             display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
@@ -10063,12 +10311,11 @@ function CartView({
               style={{ ...inputStyle(), resize: 'vertical', minHeight: '60px' }} />
           </CollapsibleField>
 
-          <CollapsibleField label="Card message (optional)" hint="If the customer wants a note written on a card." value={orderForm.cardMessage}>
-            <textarea className="text-input" value={orderForm.cardMessage || ''}
-              onChange={(e) => setOrderForm({ ...orderForm, cardMessage: e.target.value })}
-              placeholder='e.g. "Happy birthday, Mom! Love, Sarah"'
-              rows="3"
-              style={{ ...inputStyle(), resize: 'vertical', minHeight: '70px', fontFamily: '"Playfair Display", serif', fontStyle: 'italic' }} />
+          <CollapsibleField label="Card messages (optional)" hint="One per bouquet that needs a card. Tap + to add more." value={(orderForm.cardMessages || []).join(' ')}>
+            <CardMessagesEditor
+              cardMessages={orderForm.cardMessages || []}
+              onChange={(next) => setOrderForm({ ...orderForm, cardMessages: next })}
+            />
           </CollapsibleField>
         </div>
       )}
