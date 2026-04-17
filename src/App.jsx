@@ -1924,7 +1924,7 @@ export default function App() {
             gap: 14px;
             min-width: 0;
           }
-          .build-side-only-desktop { display: block; }
+          .build-side-only-desktop { display: flex; }
           .build-mobile-footer { display: none; }
         }
 
@@ -9738,11 +9738,12 @@ function CartView({
       {/* Desktop save summary — sticks to the bottom of the side column's
           scroll container so the customer-pays total + save button stay
           visible like the main HUD does at the top. Mobile gets its own
-          sticky footer further down (the build-mobile-footer block). */}
+          sticky footer further down (the build-mobile-footer block), so
+          this one stays hidden on narrow viewports via .build-side-only-desktop. */}
+      {cartHasItems && (
       <div className="build-side-only-desktop" style={{
         background: C.ink, color: C.card, padding: '14px 16px', borderRadius: '12px',
         boxShadow: '0 -8px 24px rgba(42,53,40,0.28)',
-        display: cartHasItems ? 'flex' : 'none',
         alignItems: 'center', gap: '12px',
         position: 'sticky', bottom: 0, zIndex: 30,
         marginTop: 'auto',
@@ -9767,6 +9768,7 @@ function CartView({
           {saveButtonLabel} <CalendarPlus size={14} strokeWidth={2} />
         </button>
       </div>
+      )}
     </div>
   );
 
