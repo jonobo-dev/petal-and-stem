@@ -1969,6 +1969,32 @@ export default function App() {
             display: none !important;
           }
         }
+
+        /* Narrow-phone overrides. Targets viewports <=500px so cards, tabs,
+           and chrome stop fighting for horizontal space on real phones. */
+        @media (max-width: 500px) {
+          .app-header { padding: 18px 12px 10px !important; }
+          .app-tabs { padding: 0 12px 12px !important; }
+          .app-main { padding: 16px 12px !important; }
+          .tab-btn {
+            font-size: 13px !important;
+            padding: 10px 4px !important;
+            gap: 3px !important;
+          }
+          /* Flower/bouquet card thumbnails: from ~28% down to a tight fixed
+             size so the text column has room to wrap at readable widths. */
+          .card-thumb { width: 68px !important; }
+          /* Pencil/trash/etc. — tighter padding so they stop eating card width. */
+          .icon-btn { padding: 7px !important; }
+          /* Build picker sub-tabs — same cramping story as the main tabs. */
+          .build-sub-tabs button {
+            font-size: 12px !important;
+            padding: 8px 4px !important;
+            gap: 3px !important;
+          }
+          /* Lift the scroll-to-top FAB above the Build sticky footer. */
+          .fab-top { bottom: 100px !important; }
+        }
       `}</style>
 
       {/* Sticky chrome: business header + tab strip stay pinned to the top
@@ -1978,7 +2004,7 @@ export default function App() {
         background: C.bg,
         borderBottom: `1px solid ${C.borderSoft}`,
       }}>
-      <header style={{ padding: '24px 20px 14px', maxWidth: '880px', margin: '0 auto' }}>
+      <header className="app-header" style={{ padding: '24px 20px 14px', maxWidth: '880px', margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
           <div style={{ width: '40px', height: '40px', background: C.sageDeep, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Leaf size={20} color={C.card} strokeWidth={1.5} />
@@ -2031,7 +2057,7 @@ export default function App() {
         </p>
       </header>
 
-      <div style={{ maxWidth: '880px', margin: '0 auto', padding: '0 20px 14px' }}>
+      <div className="app-tabs" style={{ maxWidth: '880px', margin: '0 auto', padding: '0 20px 14px' }}>
         <div style={{ display: 'flex', gap: '3px', background: C.bgDeep, padding: '3px', borderRadius: '11px' }}>
           <TabButton active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} label="Flowers" />
           <TabButton active={activeTab === 'materials'} onClick={() => setActiveTab('materials')} label="Supplies" />
@@ -2042,7 +2068,7 @@ export default function App() {
       </div>
       </div>
 
-      <main style={{ maxWidth: '880px', margin: '0 auto', padding: '20px' }}>
+      <main className="app-main" style={{ maxWidth: '880px', margin: '0 auto', padding: '20px' }}>
         {/* Backup nudge — gentle reminder when she's accumulated meaningful
             data (>5 orders) and hasn't backed up in a while. Dismiss defers
             the next nudge for 7 days. */}
@@ -2550,6 +2576,7 @@ function ScrollToTop() {
   return (
     <button onClick={goTop}
       aria-label="Back to top" title="Back to top"
+      className="fab-top"
       style={{
         position: 'fixed', right: '18px', bottom: '24px', zIndex: 90,
         width: '44px', height: '44px', borderRadius: '12px',
@@ -6574,7 +6601,7 @@ function BouquetCard({ bouquet, flowers, materials, bouquets, editMode, selected
       <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
         {editMode && <SelectCheckbox checked={!!selected} />}
         {bouquet.imageUrl && (
-          <div style={{
+          <div className="card-thumb" style={{
             width: 'min(28%, 160px)', aspectRatio: '1', borderRadius: '12px',
             background: `url(${bouquet.imageUrl}) ${imgPos} / ${imgZoom * 100}% no-repeat`,
             flexShrink: 0, border: `1px solid ${C.borderSoft}`,
@@ -6958,7 +6985,7 @@ function FlowerCard({ flower, expanded, editMode, selected, onToggleSelect, onEd
       <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
         {editMode && <SelectCheckbox checked={!!selected} />}
         {flower.imageUrl && (
-          <div style={{
+          <div className="card-thumb" style={{
             width: 'min(28%, 160px)', aspectRatio: '1', borderRadius: '12px',
             background: `url(${flower.imageUrl}) ${imgPos} / ${imgZoom * 100}% no-repeat`,
             flexShrink: 0, border: `1px solid ${C.borderSoft}`,
@@ -9436,7 +9463,7 @@ function CartView({
         </button>
       </div>
 
-      <div style={{
+      <div className="build-sub-tabs" style={{
         display: 'flex', gap: '4px', background: C.bgDeep, padding: '4px',
         borderRadius: '10px', marginBottom: '12px',
       }}>
