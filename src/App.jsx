@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Flower2, X, Pencil, Minus, Leaf, Search, Loader2, Tag, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Clock, ArrowLeftRight, ArrowUp, Download, Upload, Copy, ClipboardPaste, Check, AlertCircle, Palette, Pipette, CalendarDays, ChevronLeft, ChevronRight, CircleDollarSign, CalendarPlus, BellRing, Settings, BellOff, AlertTriangle, Sheet, ExternalLink, Wifi, WifiOff, RotateCw, CreditCard, Banknote, Wallet } from 'lucide-react';
+import { Plus, Trash2, Flower2, X, Pencil, Minus, Leaf, Search, Loader2, Tag, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Clock, ArrowLeftRight, ArrowUp, Download, Upload, Copy, ClipboardPaste, Check, AlertCircle, Palette, Pipette, CalendarDays, ChevronLeft, ChevronRight, CircleDollarSign, CalendarPlus, BellRing, Settings, BellOff, AlertTriangle, Sheet, ExternalLink, Wifi, WifiOff, RotateCw, CreditCard, Banknote, Wallet, LayoutGrid, List } from 'lucide-react';
 import { storage } from './idb.js';
 import * as sheets from './sheets.js';
 import * as notifs from './notifications.js';
@@ -6451,6 +6451,7 @@ function InventoryView({
   const [search, setSearch] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'grid' — flowers only
 
   // Reset selection when leaving edit mode or switching sub-tabs
   useEffect(() => { if (!editMode) setSelected(new Set()); }, [editMode]);
@@ -6529,6 +6530,21 @@ function InventoryView({
               : `${(bouquets || []).length} ${(bouquets || []).length === 1 ? 'bouquet' : 'bouquets'}`}
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
+          {isFlowers && !editMode && (
+            <button onClick={() => setViewMode(m => m === 'list' ? 'grid' : 'list')}
+              aria-label={viewMode === 'list' ? 'Switch to grid view' : 'Switch to list view'}
+              title={viewMode === 'list' ? 'Grid view' : 'List view'}
+              style={{
+                padding: '10px', background: 'transparent',
+                border: `1px solid ${C.border}`, borderRadius: '10px',
+                color: C.inkSoft, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+              {viewMode === 'list'
+                ? <LayoutGrid size={15} strokeWidth={2} />
+                : <List size={15} strokeWidth={2} />}
+            </button>
+          )}
           <button onClick={() => setEditMode(e => !e)} style={{
             padding: '10px 14px',
             background: editMode ? C.sageDeep : 'transparent',
@@ -6585,6 +6601,16 @@ function InventoryView({
             padding: '32px 20px', textAlign: 'center', color: C.inkSoft, fontSize: '14px',
           }}>
             No flowers match "{search}".
+          </div>
+        ) : viewMode === 'grid' && !editMode ? (
+          <div className="flower-grid" style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+            gap: '10px',
+          }}>
+            {filteredFlowers.map(f => (
+              <FlowerTile key={f.id} flower={f} onEdit={onEdit} />
+            ))}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -7170,6 +7196,59 @@ function FlowerCard({ flower, expanded, editMode, selected, onToggleSelect, onEd
         </div>
       )}
     </div>
+  );
+}
+
+// Compact photo-first tile used by the flowers grid view. Tap opens the
+// same edit modal that the list view's pencil opens, so she can act on
+// any flower without losing grid context (no extra "details" sheet).
+function FlowerTile({ flower, onEdit }) {
+  const isPer = flower.pricingMode !== 'flat';
+  const stemPrice = isPer ? flower.bunchPrice / flower.bunchCount : null;
+  const imgPos = flower.imagePosition || '50% 50%';
+  const imgZoom = typeof flower.imageZoom === 'number' && flower.imageZoom > 0 ? flower.imageZoom : 1;
+  const initial = (flower.name || '?').charAt(0).toUpperCase();
+
+  return (
+    <button onClick={() => onEdit(flower)}
+      className="flower-card"
+      aria-label={`Edit ${flower.name}`}
+      style={{
+        background: C.card, border: `1px solid ${C.borderSoft}`,
+        borderRadius: '12px', padding: '8px',
+        display: 'flex', flexDirection: 'column', gap: '8px',
+        cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+        overflow: 'hidden',
+      }}>
+      {flower.imageUrl ? (
+        <div style={{
+          aspectRatio: '1', borderRadius: '8px',
+          background: `url(${flower.imageUrl}) ${imgPos} / ${imgZoom * 100}% no-repeat`,
+          border: `1px solid ${C.borderSoft}`,
+        }} aria-hidden />
+      ) : (
+        <div style={{
+          aspectRatio: '1', borderRadius: '8px',
+          background: C.bgDeep, border: `1px dashed ${C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: C.inkFaint, fontSize: '28px', fontWeight: 500,
+        }} className="serif" aria-hidden>{initial}</div>
+      )}
+      <div style={{ minWidth: 0 }}>
+        <div style={{
+          fontSize: '13px', fontWeight: 600, color: C.ink, lineHeight: 1.2,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{flower.name}</div>
+        <div className="serif" style={{
+          fontSize: '14px', fontWeight: 600, color: C.sageDeep,
+          letterSpacing: '-0.01em', marginTop: '2px', lineHeight: 1.1,
+        }}>
+          {isPer
+            ? `$${stemPrice.toFixed(2)}`
+            : `$${flower.flatMin.toFixed(2)}–${flower.flatMax.toFixed(2)}`}
+        </div>
+      </div>
+    </button>
   );
 }
 
