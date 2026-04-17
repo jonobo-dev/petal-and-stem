@@ -1999,6 +1999,28 @@ export default function App() {
           .cal-day { padding: 2px 1px !important; }
           .cal-day-num { font-size: 12px !important; }
           .cal-day-time { font-size: 8px !important; margin-top: 1px !important; }
+          /* Restock (Shopping tab): stack customer filter above items so
+             item names aren't squished by the side rail. Rail becomes a
+             horizontal scroll-chip bar on top. */
+          .restock-grid {
+            grid-template-columns: 1fr !important;
+            gap: 8px !important;
+          }
+          .restock-rail {
+            flex-direction: row !important;
+            overflow-x: auto !important;
+            overflow-y: visible !important;
+            padding-right: 0 !important;
+            border-right: none !important;
+            padding-bottom: 4px !important;
+            flex-shrink: 0;
+          }
+          .restock-rail button { flex-shrink: 0; }
+          /* The rail's "Customer" label becomes a chip too — keep it compact. */
+          .restock-rail > div:first-child {
+            padding: 8px 6px 8px 0 !important;
+            align-self: center;
+          }
         }
 
         /* Ultra-narrow tier for the smallest phones (iPhone SE 1st-gen and
@@ -7985,7 +8007,7 @@ function TripCard({
         textTransform: 'uppercase', color: C.inkFaint, marginBottom: '6px',
         flexShrink: 0,
       }}>To buy</div>
-      <div style={{
+      <div className="restock-grid" style={{
         display: 'grid',
         // Slim customer rail (~25%) so the actual checklist gets the room.
         gridTemplateColumns: showCustomerSplit ? 'minmax(100px, 0.4fr) minmax(0, 1.6fr)' : '1fr',
@@ -7995,7 +8017,7 @@ function TripCard({
         flex: 1, minHeight: 0,
       }}>
         {showCustomerSplit && (
-          <div className="no-scrollbar" style={{
+          <div className="no-scrollbar restock-rail" style={{
             display: 'flex', flexDirection: 'column', gap: '4px',
             paddingRight: '6px', borderRight: `1px solid ${C.borderSoft}`,
             overflowY: 'auto', minHeight: 0,
