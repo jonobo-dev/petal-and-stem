@@ -7203,7 +7203,7 @@ function FlowerCard({ flower, expanded, editMode, selected, onToggleSelect, onEd
 // same edit modal that the list view's pencil opens, so she can act on
 // any flower without losing grid context (no extra "details" sheet).
 function FlowerTile({ flower, onEdit }) {
-  const isPer = flower.pricingMode !== 'flat';
+  const isPer = flower.mode === 'perStem';
   const stemPrice = isPer ? flower.bunchPrice / flower.bunchCount : null;
   const imgPos = flower.imagePosition || '50% 50%';
   const imgZoom = typeof flower.imageZoom === 'number' && flower.imageZoom > 0 ? flower.imageZoom : 1;
