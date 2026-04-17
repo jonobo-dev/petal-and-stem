@@ -2015,7 +2015,12 @@ export default function App() {
             padding-bottom: 4px !important;
             flex-shrink: 0;
           }
-          .restock-rail button { flex-shrink: 0; }
+          .restock-rail button {
+            flex-shrink: 0;
+            justify-content: flex-start !important;
+            gap: 6px !important;
+            padding: 7px 11px !important;
+          }
           /* The rail's "Customer" label becomes a chip too — keep it compact. */
           .restock-rail > div:first-child {
             padding: 8px 6px 8px 0 !important;
