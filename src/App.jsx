@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Trash2, Flower2, X, Pencil, Minus, Leaf, Search, Loader2, Tag, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Clock, ArrowLeftRight, ArrowUp, Download, Upload, Copy, ClipboardPaste, Check, AlertCircle, Palette, Pipette, CalendarDays, ChevronLeft, ChevronRight, CircleDollarSign, CalendarPlus, BellRing, Settings, BellOff, AlertTriangle, Sheet, ExternalLink, Wifi, WifiOff, RotateCw, CreditCard, Banknote, Wallet, LayoutGrid, List } from 'lucide-react';
 import { storage } from './idb.js';
 import * as sheets from './sheets.js';
+import * as drive from './drive.js';
 import * as notifs from './notifications.js';
 import * as onesignal from './onesignal.js';
 import {
@@ -409,11 +410,15 @@ export default function App() {
   // PWA-only state
   const [permState, setPermState] = useState('default');
   const [sheetsState, setSheetsState] = useState({ connected: false, lastSync: null, syncing: false });
+  const [driveState, setDriveState] = useState({ lastSync: null, syncing: false, lastError: null });
+  // Holds a pending restore offer after a fresh connect — { exportedAt, modifiedTime, data }
+  const [restoreOffer, setRestoreOffer] = useState(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [toast, setToast] = useState(null);
   const [pendingUndo, setPendingUndo] = useState(null);
 
   const syncTimerRef = useRef(null);
+  const driveTimerRef = useRef(null);
   const focusOrderRef = useRef(null);
   const toastTimerRef = useRef(null);
   const undoTimerRef = useRef(null);
@@ -561,6 +566,31 @@ export default function App() {
     }
   }, [isOnline]);
 
+  // Drive backup — debounced auto-push of the full data blob (JSON + images)
+  // to a single file in her Google Drive. Reuses the same OAuth session as
+  // sheets. Runs independently of sheets sync so either can fail without
+  // taking the other down.
+  useEffect(() => {
+    if (loading) return;
+    if (!drive.isConfigured()) return;
+    if (!sheetsState.connected) return; // shared auth — sheets connected ⇒ drive connected
+    if (driveTimerRef.current) clearTimeout(driveTimerRef.current);
+    driveTimerRef.current = setTimeout(async () => {
+      setDriveState((s) => ({ ...s, syncing: true, lastError: null }));
+      try {
+        const payload = buildExport(flowers, materials, orders, settings);
+        const meta = await drive.uploadBackup(payload);
+        setDriveState({
+          lastSync: meta.modifiedTime || new Date().toISOString(),
+          syncing: false, lastError: null,
+        });
+      } catch (e) {
+        setDriveState((s) => ({ ...s, syncing: false, lastError: e.message || 'upload failed' }));
+      }
+    }, SYNC_DEBOUNCE_MS);
+    return () => { if (driveTimerRef.current) clearTimeout(driveTimerRef.current); };
+  }, [flowers, materials, orders, settings, sheetsState.connected, loading]);
+
   const loadAll = async () => {
     try {
       const r = await storage.get('settings_v1');
@@ -676,6 +706,14 @@ export default function App() {
       const connected = await sheets.isConnected();
       const lastSync = await sheets.getLastSync();
       setSheetsState({ connected, lastSync, syncing: false });
+      // Drive backup state — use the last modifiedTime we saw on Drive as
+      // our "last synced" display value. Non-blocking: if this fails, the
+      // UI just shows "never" and the first data change will refresh it.
+      if (connected) {
+        drive.getLastKnownModified()
+          .then((t) => { if (t) setDriveState({ lastSync: t, syncing: false, lastError: null }); })
+          .catch(() => {});
+      }
     }
 
     // OneSignal SDK init — non-blocking, failures are silent
@@ -766,14 +804,82 @@ export default function App() {
       setSheetsState((s) => ({ ...s, connected: true }));
       // Trigger initial sync immediately
       handleManualSync();
+      // Also check for an existing Drive backup — if there's one with more
+      // recent data than what we have locally, offer to restore it. This is
+      // the core "new device, sign in, get your data" flow.
+      try {
+        const meta = await drive.getBackupMeta();
+        if (meta && meta.id) {
+          const data = await drive.downloadBackup();
+          if (data && data.exportedAt) {
+            const cloudTime = new Date(data.exportedAt).getTime();
+            const localTime = lastExport ? new Date(lastExport).getTime() : 0;
+            // Offer restore if cloud is meaningfully newer (>10s — handles clock skew).
+            if (cloudTime > localTime + 10_000) {
+              setRestoreOffer({
+                exportedAt: data.exportedAt,
+                modifiedTime: meta.modifiedTime,
+                data,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Non-fatal: sheets is connected, drive restore just didn't surface.
+        if (typeof console !== 'undefined') console.warn('[drive] restore check failed:', e);
+      }
     } catch (e) {
       showToast(`Couldn't connect to Google: ${e.message}`);
     }
   };
   const handleDisconnectSheets = async () => {
     await sheets.disconnect();
+    await drive.clearLocalDriveState().catch(() => {});
     setSheetsState({ connected: false, lastSync: null, syncing: false });
+    setDriveState({ lastSync: null, syncing: false, lastError: null });
   };
+  // Manual "pull from cloud" — downloads the latest Drive backup and applies
+  // it locally (same path as a manual JSON import). Useful on a 2nd device
+  // that wasn't around when the 1st device pushed.
+  const handlePullFromDrive = async () => {
+    if (!sheetsState.connected) return;
+    setDriveState((s) => ({ ...s, syncing: true, lastError: null }));
+    try {
+      const data = await drive.downloadBackup();
+      if (!data) {
+        setDriveState((s) => ({ ...s, syncing: false, lastError: 'No backup in Drive yet' }));
+        showToast('No backup in Drive yet — make a change and one will be created.', 'info');
+        return;
+      }
+      const result = await handleImport(data);
+      if (!result.ok) {
+        setDriveState((s) => ({ ...s, syncing: false, lastError: result.error }));
+        showToast(`Restore failed: ${result.error}`);
+        return;
+      }
+      const meta = await drive.getBackupMeta();
+      setDriveState({
+        lastSync: meta?.modifiedTime || new Date().toISOString(),
+        syncing: false, lastError: null,
+      });
+      showToast('Restored from Drive backup.', 'info');
+    } catch (e) {
+      setDriveState((s) => ({ ...s, syncing: false, lastError: e.message || 'download failed' }));
+      showToast(`Couldn't pull from Drive: ${e.message}`);
+    }
+  };
+  const handleAcceptRestore = async () => {
+    if (!restoreOffer) return;
+    const result = await handleImport(restoreOffer.data);
+    setRestoreOffer(null);
+    if (result.ok) {
+      setDriveState((s) => ({ ...s, lastSync: restoreOffer.modifiedTime || restoreOffer.exportedAt }));
+      showToast('Restored from your Drive backup.', 'info');
+    } else {
+      showToast(`Restore failed: ${result.error}`);
+    }
+  };
+  const handleDeclineRestore = () => setRestoreOffer(null);
   const handleManualSync = async () => {
     if (!sheetsState.connected) return;
     setSheetsState((s) => ({ ...s, syncing: true }));
@@ -2341,6 +2447,8 @@ export default function App() {
           onDisconnectSheets={handleDisconnectSheets}
           onManualSync={handleManualSync}
           getSheetUrl={getSheetUrl}
+          driveState={driveState}
+          onPullFromDrive={handlePullFromDrive}
         />
       )}
       {showStats && (
@@ -2368,6 +2476,10 @@ export default function App() {
       <UndoSnackbar undo={pendingUndo} onUndo={runUndo} onDismiss={commitUndo} />
       <Toast toast={toast} onDismiss={() => setToast(null)} />
       <ScrollToTop />
+      {restoreOffer && (
+        <RestoreOfferModal offer={restoreOffer}
+          onAccept={handleAcceptRestore} onDecline={handleDeclineRestore} />
+      )}
       {!loading && !settings.onboardingComplete && (
         <OnboardingModal
           settings={settings}
@@ -2642,6 +2754,73 @@ function ScrollToTop() {
       }}>
       <ArrowUp size={20} strokeWidth={2.4} />
     </button>
+  );
+}
+
+// Shown after "Connect Google" when a newer backup exists in her Drive
+// (typical case: she signed in on a new device). Gives her a chance to
+// pull it down before she makes local changes that would get pushed on
+// top of the existing backup.
+function RestoreOfferModal({ offer, onAccept, onDecline }) {
+  const when = offer?.exportedAt ? new Date(offer.exportedAt) : null;
+  const whenText = when ? when.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  }) : 'unknown';
+  const counts = offer?.data ? {
+    flowers: (offer.data.flowers || []).length,
+    materials: (offer.data.materials || []).length,
+    orders: (offer.data.orders || []).length,
+  } : null;
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(42,53,40,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '20px', zIndex: 80, backdropFilter: 'blur(4px)',
+    }}>
+      <div className="modal-content" style={{
+        background: C.card, borderRadius: '16px', padding: '24px',
+        width: '100%', maxWidth: '440px',
+        boxShadow: '0 20px 60px rgba(42,53,40,0.25)',
+      }}>
+        <h2 className="serif" style={{ fontSize: '22px', margin: '0 0 6px', fontWeight: 500, letterSpacing: '-0.01em' }}>
+          Backup found in your Drive
+        </h2>
+        <div style={{ fontSize: '13px', color: C.inkSoft, lineHeight: 1.5, marginBottom: '14px' }}>
+          A backup from <strong>{whenText}</strong> is waiting. Restore it to this device?
+        </div>
+        {counts && (
+          <div style={{
+            fontSize: '12px', color: C.inkFaint, background: C.bgDeep,
+            padding: '10px 12px', borderRadius: '8px', marginBottom: '18px',
+            letterSpacing: '0.02em',
+          }}>
+            {counts.flowers} flower{counts.flowers === 1 ? '' : 's'} · {counts.materials} suppl{counts.materials === 1 ? 'y' : 'ies'} · {counts.orders} order{counts.orders === 1 ? '' : 's'}
+          </div>
+        )}
+        <div style={{
+          fontSize: '12px', color: C.inkSoft, background: `${C.gold}1a`,
+          padding: '10px 12px', borderRadius: '8px', marginBottom: '18px',
+          lineHeight: 1.5,
+        }}>
+          Restoring <strong>replaces</strong> what's currently on this device. Skip if this device already has the data you want.
+        </div>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button onClick={onDecline} style={{
+            padding: '10px 16px', background: 'transparent',
+            border: `1px solid ${C.border}`, borderRadius: '10px',
+            color: C.inkSoft, fontFamily: 'inherit', fontSize: '14px', fontWeight: 500, cursor: 'pointer',
+          }}>Skip</button>
+          <button onClick={onAccept} className="primary-btn" style={{
+            padding: '10px 18px', background: C.sageDeep, border: 'none', borderRadius: '10px',
+            color: C.card, fontFamily: 'inherit', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '6px',
+          }}>
+            <Download size={14} strokeWidth={2.2} /> Restore
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3192,6 +3371,7 @@ function SettingsModal({
   settings, onSave, onClearAll, onClose,
   permState, onEnableNotifications, onTestNotification,
   sheetsState, isOnline, onConnectSheets, onDisconnectSheets, onManualSync, getSheetUrl,
+  driveState, onPullFromDrive,
 }) {
   const [draft, setDraft] = useState(settings);
   const [confirmStage, setConfirmStage] = useState(0);
@@ -3472,6 +3652,16 @@ function SettingsModal({
               onConnect={onConnectSheets}
               onDisconnect={onDisconnectSheets}
               onSync={onManualSync}
+            />
+          </CollapsibleSection>
+        )}
+
+        {sheetsConfigured && sheetsState.connected && (
+          <CollapsibleSection title="Cloud backup">
+            <DrivePanel
+              state={driveState}
+              isOnline={isOnline}
+              onPull={onPullFromDrive}
             />
           </CollapsibleSection>
         )}
@@ -3831,6 +4021,69 @@ function SheetsPanel({ state, isOnline, sheetUrl, onConnect, onDisconnect, onSyn
           border: `1px solid ${C.rose}`, borderRadius: '6px',
           fontSize: '11px', color: C.roseDeep,
         }}>Last sync failed. Tap "Sync now" to retry.</div>
+      )}
+    </div>
+  );
+}
+
+// Cloud backup (Drive JSON) settings panel. Renders under the Google
+// Sheets sync section since they share auth — if sheets is connected,
+// drive is too. Auto-push is invisible; the manual "Pull from cloud"
+// button is the primary UX for restoring on a second device.
+function DrivePanel({ state, isOnline, onPull }) {
+  const lastSync = state.lastSync ? new Date(state.lastSync) : null;
+  const whenText = lastSync
+    ? lastSync.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : 'never';
+  const statusDot = state.syncing ? C.gold
+    : state.lastError ? C.roseDeep
+    : lastSync ? C.sageDeep
+    : C.inkFaint;
+  return (
+    <div>
+      <div style={{
+        padding: '12px 14px', background: C.bg,
+        border: `1px solid ${C.border}`, borderRadius: '10px',
+        display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px',
+      }}>
+        <span style={{
+          width: '8px', height: '8px', borderRadius: '50%',
+          background: statusDot, flexShrink: 0,
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: C.ink }}>
+            {state.syncing ? 'Syncing to Drive…'
+              : state.lastError ? 'Sync failed'
+              : 'Auto-backup active'}
+          </div>
+          <div style={{ fontSize: '11px', color: C.inkFaint, marginTop: '2px' }}>
+            Last synced: {whenText}
+          </div>
+        </div>
+      </div>
+      <div style={{
+        fontSize: '12px', color: C.inkSoft, lineHeight: 1.5, marginBottom: '12px',
+      }}>
+        Every change auto-uploads a full backup (including photos) to a file in your Drive.
+        On a new phone or PC, sign in with the same Google account and tap below to pull it down.
+      </div>
+      <button onClick={onPull} disabled={!isOnline || state.syncing} style={{
+        padding: '10px 14px', background: C.card,
+        border: `1px solid ${C.border}`, borderRadius: '10px',
+        color: (!isOnline || state.syncing) ? C.inkFaint : C.ink,
+        fontFamily: 'inherit', fontSize: '13px', fontWeight: 500,
+        cursor: (!isOnline || state.syncing) ? 'not-allowed' : 'pointer',
+        display: 'flex', alignItems: 'center', gap: '8px',
+      }}>
+        <Download size={14} strokeWidth={2} /> Pull latest from Drive
+      </button>
+      {state.lastError && (
+        <div style={{
+          marginTop: '10px', padding: '8px 10px',
+          background: `${C.roseDeep}15`, border: `1px solid ${C.roseDeep}44`,
+          borderRadius: '8px', fontSize: '11px', color: C.roseDeep,
+          lineHeight: 1.4,
+        }}>{state.lastError}</div>
       )}
     </div>
   );

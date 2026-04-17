@@ -82,7 +82,7 @@ function requestToken({ silent = false } = {}) {
   });
 }
 
-async function getValidToken() {
+export async function getValidToken() {
   if (accessToken && tokenExpiresAt > Date.now() + 60_000) return accessToken;
 
   // Try restoring from IDB
