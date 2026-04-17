@@ -6,7 +6,7 @@
 // If left empty, the Google Sheets sync feature will be disabled but
 // everything else (offline ledger, calendar export, notifications) still works.
 
-export const GOOGLE_CLIENT_ID = '';
+export const GOOGLE_CLIENT_ID = '6610110275-1dk6eqeca7sbopegfc66261q84600ao4.apps.googleusercontent.com';
 
 // Scopes the app requests during OAuth.
 //   spreadsheets — create + edit Sheets
