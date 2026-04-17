@@ -6218,30 +6218,47 @@ function MaterialCard({ material, types, editMode, selected, onToggleSelect, onE
         </div>
       )}
 
-      <div>
-        <div style={{
-          fontSize: '15px', fontWeight: 600, color: C.ink, lineHeight: 1.25,
-          marginBottom: '4px', wordBreak: 'break-word',
-        }}>
-          {material.name}
-        </div>
-        {material.unitPrice > 0 ? (
-          <div className="serif" style={{
-            fontSize: '17px', fontWeight: 600, color: C.sageDeep,
-            letterSpacing: '-0.01em', marginBottom: '4px', lineHeight: 1.1,
-          }}>${material.unitPrice.toFixed(2)}</div>
-        ) : (
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: '11px', fontWeight: 500, color: C.inkFaint, fontStyle: 'italic',
-            marginBottom: '4px',
-          }}>no price set</div>
-        )}
-        <div style={{ fontSize: '11px', color: C.inkFaint, letterSpacing: '0.04em' }}>
-          {typeLabel} · {colorName}
+            fontSize: '15px', fontWeight: 600, color: C.ink, lineHeight: 1.25,
+            marginBottom: '4px', wordBreak: 'break-word',
+          }}>
+            {material.name}
+          </div>
+          {material.unitPrice > 0 ? (
+            <div className="serif" style={{
+              fontSize: '17px', fontWeight: 600, color: C.sageDeep,
+              letterSpacing: '-0.01em', marginBottom: '4px', lineHeight: 1.1,
+            }}>${material.unitPrice.toFixed(2)}</div>
+          ) : (
+            <div style={{
+              fontSize: '11px', fontWeight: 500, color: C.inkFaint, fontStyle: 'italic',
+              marginBottom: '4px',
+            }}>no price set</div>
+          )}
+          <div style={{ fontSize: '11px', color: C.inkFaint, letterSpacing: '0.04em' }}>
+            {typeLabel} · {colorName}
+          </div>
+          {material.note && (
+            <div style={{ fontSize: '12px', color: C.inkSoft, marginTop: '6px', lineHeight: 1.4 }}>
+              {material.note}
+            </div>
+          )}
         </div>
-        {material.note && (
-          <div style={{ fontSize: '12px', color: C.inkSoft, marginTop: '6px', lineHeight: 1.4 }}>
-            {material.note}
+        {Array.isArray(material.storeTags) && material.storeTags.length > 0 && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: '4px',
+            alignItems: 'flex-end', flexShrink: 0, maxWidth: '45%',
+          }}>
+            {material.storeTags.map((tag, i) => (
+              <div key={i} style={{
+                fontSize: '10px', fontWeight: 500, color: C.inkSoft,
+                background: C.bgDeep, padding: '3px 8px', borderRadius: '5px',
+                letterSpacing: '0.02em', whiteSpace: 'nowrap',
+                overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
+              }}>{tag}</div>
+            ))}
           </div>
         )}
       </div>
