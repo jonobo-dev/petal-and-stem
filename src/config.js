@@ -35,8 +35,8 @@ export const SHEETS_DEBUG = false;
 // If left empty, reminders fall back to local-only notifications
 // (reliable when app is open; best-effort when closed).
 
-export const ONESIGNAL_APP_ID = '';
-export const ONESIGNAL_REST_API_KEY = '';
+export const ONESIGNAL_APP_ID = '94383035-ca3e-4f6c-9859-a51f94bcd3cf';
+export const ONESIGNAL_REST_API_KEY = 'os_v2_app_sq4danokhzhwzgczuupzjpgtz6ftscmhw4weesmhcmlbq34zwenkq7ug7jbaeaxfgeu5ndgm6r3p6hfpekzeju2tjcodysjd57gwfji';
 
 // Set to true to log OneSignal API responses to console for debugging.
-export const ONESIGNAL_DEBUG = false;
+export const ONESIGNAL_DEBUG = true;
