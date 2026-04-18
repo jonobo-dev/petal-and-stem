@@ -313,11 +313,23 @@ function migrateOrders(orders) {
   return orders.map(migrateOrder);
 }
 
+// Sum of additional bouquet line items (qty × costPer). Excludes the
+// main bouquet (which is captured in the order's arrangement/quantity/
+// costPer fields).
+function additionalBouquetsSum(order) {
+  const list = Array.isArray(order.additionalBouquets) ? order.additionalBouquets : [];
+  return list.reduce((s, b) => {
+    const q = Number(b.quantity) || 0;
+    const p = Number(b.costPer) || 0;
+    return s + q * p;
+  }, 0);
+}
+
 // Helpers for deriving order state from its payments array. The UI
 // avoids reading `order.paid` directly so partial payments display
 // correctly; use these instead.
 function orderTotal(order) {
-  return (Number(order.quantity) || 0) * (Number(order.costPer) || 0);
+  return (Number(order.quantity) || 0) * (Number(order.costPer) || 0) + additionalBouquetsSum(order);
 }
 function paymentsTotal(order) {
   return (order.payments || []).reduce((s, p) => s + (p.paid ? (Number(p.amount) || 0) : 0), 0);
@@ -400,7 +412,7 @@ export default function App() {
   const [materialForm, setMaterialForm] = useState({ name: '', type: 'ribbon', color: '#F5E6D3', unitPrice: '', note: '', storeTags: [], imageUrl: '', imagePosition: '50% 50%', imageZoom: 1 });
   const [orderForm, setOrderForm] = useState({
     customerName: '', arrangement: '', quantity: '1', costPer: '',
-    paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [],
+    paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [], additionalBouquets: [],
     eventType: 'general',
     enableReminders: true,
     items: [], extraCosts: [],
@@ -1090,7 +1102,7 @@ export default function App() {
   const resetOrderForm = () => {
     setOrderForm({
       customerName: '', arrangement: '', quantity: '1', costPer: '',
-      paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [],
+      paymentMethod: 'venmo', pickupDateTime: '', paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [], additionalBouquets: [],
       eventType: 'general',
       enableReminders: settings.remindersDefault,
       items: [], extraCosts: [],
@@ -1174,7 +1186,7 @@ export default function App() {
       customerName: cart.customerName.trim(), arrangement: arrangementText,
       quantity: '1', costPer: costPerStr,
       paymentMethod: 'venmo', pickupDateTime: defaultPickupISO(),
-      paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [],
+      paid: false, notes: '', cardMessage: '', cardMessages: [], payments: [], additionalBouquets: [],
       eventType: 'general',
       enableReminders: settings.remindersDefault,
       items: editableItems,
@@ -1206,6 +1218,9 @@ export default function App() {
       paid: o.paid, notes: o.notes || '', cardMessage: o.cardMessage || '',
       cardMessages: Array.isArray(o.cardMessages) ? o.cardMessages.slice() : (o.cardMessage ? [o.cardMessage] : []),
       payments: Array.isArray(o.payments) ? o.payments.map(p => ({ ...p })) : [],
+      additionalBouquets: Array.isArray(o.additionalBouquets) ? o.additionalBouquets.map(b => ({
+        ...b, cardMessages: Array.isArray(b.cardMessages) ? b.cardMessages.slice() : [],
+      })) : [],
       eventType: o.eventType || 'general',
       enableReminders: o.enableReminders !== false,
       items: [], extraCosts: [], // legacy fields, unused now (cart is source of truth)
@@ -1232,7 +1247,7 @@ export default function App() {
       quantity: o.quantity.toString(), costPer: o.costPer.toString(),
       paymentMethod: o.paymentMethod, pickupDateTime: freshPickup,
       paid: false, notes: o.notes || '', cardMessage: '',
-      cardMessages: [], payments: [],
+      cardMessages: [], payments: [], additionalBouquets: [],
       eventType: o.eventType || 'general',
       enableReminders: settings.remindersDefault !== false,
       items: [], extraCosts: [],
@@ -1290,7 +1305,22 @@ export default function App() {
       .filter(p => p.amount > 0 || p.paid);
     const cleanCards = (Array.isArray(orderForm.cardMessages) ? orderForm.cardMessages : [])
       .map(m => (m || '').trim()).filter(Boolean);
-    const totalForLegacy = qty * costPer;
+    // Clean additional bouquets — drop empty names, coerce numbers, strip
+    // blank card messages. Order total then sums main qty×costPer plus
+    // all additional bouquets (see orderTotal / additionalBouquetsSum).
+    const cleanAdditionalBouquets = (Array.isArray(orderForm.additionalBouquets) ? orderForm.additionalBouquets : [])
+      .map(b => ({
+        id: b.id || `bq-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: (b.name || '').trim(),
+        recipientLabel: (b.recipientLabel || '').trim(),
+        quantity: Number(b.quantity) || 0,
+        costPer: Number(b.costPer) || 0,
+        cardMessages: (Array.isArray(b.cardMessages) ? b.cardMessages : [])
+          .map(m => (m || '').trim()).filter(Boolean),
+      }))
+      .filter(b => b.name || b.quantity > 0 || b.costPer > 0 || b.cardMessages.length > 0);
+    const additionalTotal = cleanAdditionalBouquets.reduce((s, b) => s + b.quantity * b.costPer, 0);
+    const totalForLegacy = qty * costPer + additionalTotal;
     const paidSum = cleanPayments.reduce((s, p) => s + (p.paid ? p.amount : 0), 0);
     const fullyPaid = cleanPayments.length > 0 && paidSum + 0.001 >= totalForLegacy;
     const legacyMethod = cleanPayments[0]?.method || orderForm.paymentMethod || 'cash';
@@ -1304,6 +1334,7 @@ export default function App() {
       cardMessage: cleanCards[0] || undefined,
       cardMessages: cleanCards.length > 0 ? cleanCards : undefined,
       payments: cleanPayments.length > 0 ? cleanPayments : undefined,
+      additionalBouquets: cleanAdditionalBouquets.length > 0 ? cleanAdditionalBouquets : undefined,
       eventType: orderForm.eventType || 'general',
       enableReminders: orderForm.enableReminders,
       items: snapshot.length > 0 ? snapshot : undefined,
@@ -3022,6 +3053,102 @@ function PaymentsEditor({ payments, onChange, total, paymentMethods }) {
   );
 }
 
+// Editor for extra bouquets within a single order — each row has its
+// own name, optional recipient label, qty, price, and card messages.
+// Separate from the main arrangement (which has the full recipe editor)
+// so mixed orders like weddings can have 5 centerpieces + 2 bridesmaid
+// bouquets + 1 bridal bouquet as distinct line items without rebuilding
+// the whole form.
+function AdditionalBouquetsEditor({ bouquets, onChange }) {
+  const rows = Array.isArray(bouquets) ? bouquets : [];
+  const update = (i, patch) => onChange(rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  const remove = (i) => onChange(rows.filter((_, idx) => idx !== i));
+  const add = () => onChange([
+    ...rows,
+    {
+      id: `bq-${Date.now()}-${rows.length}`,
+      name: '', recipientLabel: '',
+      quantity: 1, costPer: 0,
+      cardMessages: [],
+    },
+  ]);
+
+  return (
+    <div>
+      {rows.map((row, i) => {
+        const qty = Number(row.quantity) || 0;
+        const price = Number(row.costPer) || 0;
+        const lineTotal = qty * price;
+        return (
+          <div key={row.id || i} style={{
+            padding: '12px', background: C.bg,
+            border: `1px solid ${C.borderSoft}`, borderRadius: '10px',
+            marginBottom: '10px',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: '8px',
+            }}>
+              <div style={{
+                fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em',
+                textTransform: 'uppercase', color: C.inkFaint,
+              }}>Bouquet #{i + 2}</div>
+              <button onClick={() => remove(i)} aria-label="Remove bouquet" style={{
+                background: 'transparent', border: 'none', padding: '4px',
+                cursor: 'pointer', color: C.inkFaint,
+              }}><X size={14} /></button>
+            </div>
+            <input className="text-input" type="text" value={row.name || ''}
+              onChange={(e) => update(i, { name: e.target.value })}
+              placeholder="Bouquet name (e.g. Centerpiece)"
+              style={{ ...inputStyle(), marginBottom: '6px' }} />
+            <input className="text-input" type="text" value={row.recipientLabel || ''}
+              onChange={(e) => update(i, { recipientLabel: e.target.value })}
+              placeholder="For (optional) — e.g. Maid of honor"
+              style={{ ...inputStyle(), marginBottom: '8px', fontSize: '13px' }} />
+            <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr auto', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+              <input className="text-input" type="number" min="1" value={row.quantity ?? ''}
+                onChange={(e) => update(i, { quantity: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                placeholder="Qty"
+                style={{ ...inputStyle(), fontSize: '13px', padding: '8px' }} />
+              <div style={{ position: 'relative' }}>
+                <span style={{
+                  position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)',
+                  fontSize: '13px', color: C.inkFaint, pointerEvents: 'none',
+                }}>$</span>
+                <input className="text-input" type="number" inputMode="decimal" step="0.01" min="0"
+                  value={row.costPer ?? ''}
+                  onChange={(e) => update(i, { costPer: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                  placeholder="0.00"
+                  style={{ ...inputStyle(), padding: '8px 8px 8px 22px', fontSize: '13px' }} />
+              </div>
+              <div style={{
+                fontSize: '13px', fontWeight: 600, color: C.sageDeep,
+                minWidth: '60px', textAlign: 'right',
+              }}>${lineTotal.toFixed(2)}</div>
+            </div>
+            <div style={{
+              fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
+              textTransform: 'uppercase', color: C.inkFaint, marginBottom: '4px',
+            }}>Cards for this bouquet</div>
+            <CardMessagesEditor
+              cardMessages={row.cardMessages || []}
+              onChange={(next) => update(i, { cardMessages: next })}
+            />
+          </div>
+        );
+      })}
+      <button onClick={add} style={{
+        padding: '10px 14px', background: 'transparent',
+        border: `1px dashed ${C.border}`, borderRadius: '10px',
+        color: C.inkSoft, fontFamily: 'inherit', fontSize: '13px',
+        fontWeight: 500, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
+      }}><Plus size={14} strokeWidth={2} /> Add another bouquet</button>
+    </div>
+  );
+}
+
 // Editor for multiple card messages — one textarea per note card, with
 // + to add another and × to remove. Empty cards are fine in the editor;
 // submitOrderForm filters them before saving.
@@ -4637,7 +4764,9 @@ function OrderCard({ order, settings, highlighted, onEdit, onDuplicate, onDelete
     const n = Number(e.amount);
     return s + (isFinite(n) && n > 0 ? n : 0);
   }, 0);
-  const subtotalRaw = order.quantity * order.costPer + extrasSum;
+  const addSum = additionalBouquetsSum(order);
+  const additionalBouquets = Array.isArray(order.additionalBouquets) ? order.additionalBouquets : [];
+  const subtotalRaw = order.quantity * order.costPer + addSum + extrasSum;
   const discAmount = discountAmountOf(subtotalRaw, order.discount);
   const total = Math.max(0, subtotalRaw - discAmount);
   const paymentList = (settings && settings.paymentMethods) || PAYMENT_METHODS;
@@ -4797,6 +4926,66 @@ function OrderCard({ order, settings, highlighted, onEdit, onDuplicate, onDelete
           )}
         </div>
       </div>
+
+      {additionalBouquets.length > 0 && (
+        <div style={{
+          padding: '10px 12px', background: C.bg,
+          border: `1px solid ${C.borderSoft}`, borderRadius: '8px',
+        }}>
+          <div style={{
+            fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase', color: C.inkFaint, marginBottom: '6px',
+            display: 'flex', alignItems: 'center', gap: '4px',
+          }}>
+            <Sheet size={11} strokeWidth={2} /> {additionalBouquets.length} more bouquet{additionalBouquets.length === 1 ? '' : 's'} in this order
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {additionalBouquets.map((b, i) => {
+              const qty = Number(b.quantity) || 0;
+              const price = Number(b.costPer) || 0;
+              const lineTotal = qty * price;
+              const bqCards = Array.isArray(b.cardMessages) ? b.cardMessages.filter(Boolean) : [];
+              return (
+                <div key={b.id || i} style={{
+                  paddingTop: i > 0 ? '6px' : 0,
+                  borderTop: i > 0 ? `1px dashed ${C.borderSoft}` : 'none',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 500, color: C.ink, lineHeight: 1.3 }}>
+                        {b.name || <span style={{ fontStyle: 'italic', color: C.inkFaint }}>Unnamed bouquet</span>}
+                        {b.recipientLabel && (
+                          <span style={{ color: C.inkFaint, fontWeight: 400 }}> — For {b.recipientLabel}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '11px', color: C.inkFaint, marginTop: '2px' }}>
+                        {qty} × ${price.toFixed(2)}
+                      </div>
+                    </div>
+                    <div style={{
+                      fontSize: '14px', fontWeight: 600, color: C.sageDeep,
+                      flexShrink: 0, alignSelf: 'center',
+                    }}>${lineTotal.toFixed(2)}</div>
+                  </div>
+                  {bqCards.length > 0 && (
+                    <div style={{
+                      marginTop: '6px', paddingLeft: '10px',
+                      borderLeft: `2px solid ${C.gold}55`,
+                    }}>
+                      {bqCards.map((m, ci) => (
+                        <div key={ci} className="italic" style={{
+                          fontSize: '12px', color: C.inkSoft, lineHeight: 1.4,
+                          marginBottom: ci < bqCards.length - 1 ? '3px' : 0,
+                        }}>"{m}"</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {((order.items && order.items.length > 0) || (order.extraCosts && order.extraCosts.length > 0)) && (
         <details style={{
@@ -6116,6 +6305,13 @@ function OrderFormModal({ form, setForm, editingId, settings, flowers, materials
           <CardMessagesEditor
             cardMessages={form.cardMessages || []}
             onChange={(next) => setForm({ ...form, cardMessages: next })}
+          />
+        </Field>
+
+        <Field label="More bouquets in this order (optional)" hint="Add extra bouquets that ship with this order — e.g. centerpieces, bridesmaid bouquets. Each can have its own name, price, and card messages.">
+          <AdditionalBouquetsEditor
+            bouquets={form.additionalBouquets || []}
+            onChange={(next) => setForm({ ...form, additionalBouquets: next })}
           />
         </Field>
 
@@ -9936,6 +10132,17 @@ function EditOrderModal({
               onChange={(next) => setOrderForm({ ...orderForm, cardMessages: next })}
             />
           </CollapsibleField>
+
+          <CollapsibleField
+            label="More bouquets in this order (optional)"
+            hint="Add extra bouquets shipping with this order — e.g. centerpieces, bridesmaid bouquets."
+            value={(orderForm.additionalBouquets || []).map(b => b.name || '').join(' ')}
+          >
+            <AdditionalBouquetsEditor
+              bouquets={orderForm.additionalBouquets || []}
+              onChange={(next) => setOrderForm({ ...orderForm, additionalBouquets: next })}
+            />
+          </CollapsibleField>
         </div>
 
         <div style={{
@@ -10315,6 +10522,17 @@ function CartView({
             <CardMessagesEditor
               cardMessages={orderForm.cardMessages || []}
               onChange={(next) => setOrderForm({ ...orderForm, cardMessages: next })}
+            />
+          </CollapsibleField>
+
+          <CollapsibleField
+            label="More bouquets in this order (optional)"
+            hint="Add extra bouquets shipping with this order — e.g. centerpieces, bridesmaid bouquets."
+            value={(orderForm.additionalBouquets || []).map(b => b.name || '').join(' ')}
+          >
+            <AdditionalBouquetsEditor
+              bouquets={orderForm.additionalBouquets || []}
+              onChange={(next) => setOrderForm({ ...orderForm, additionalBouquets: next })}
             />
           </CollapsibleField>
         </div>
