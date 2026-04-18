@@ -5776,9 +5776,13 @@ function PickerOverlay({ flowers, materials, bouquets, itemsByKey, setItemQty, o
   const [pickerTab, setPickerTab] = useState('flowers');
   const [search, setSearch] = useState('');
 
-  const list = pickerTab === 'flowers' ? (flowers || [])
+  const rawList = pickerTab === 'flowers' ? (flowers || [])
     : pickerTab === 'materials' ? (materials || [])
     : (bouquets || []);
+  // Alphabetical sort so the picker stays predictable as the catalog grows.
+  const list = useMemo(() =>
+    [...rawList].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+  , [rawList]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return list;
@@ -7142,19 +7146,24 @@ function InventoryView({
     setEditMode(false);
   };
 
+  // Alphabetical sort by name so long lists stay scannable; search
+  // filters the already-sorted list (preserves order).
+  const sortByName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
   const filteredFlowers = useMemo(() => {
+    const sorted = [...(flowers || [])].sort(sortByName);
     const q = search.trim().toLowerCase();
-    if (!q) return flowers;
-    return flowers.filter(f =>
+    if (!q) return sorted;
+    return sorted.filter(f =>
       f.name.toLowerCase().includes(q)
       || (f.description && f.description.toLowerCase().includes(q))
       || (f.priceHistory || []).some(h => h.note && h.note.toLowerCase().includes(q))
     );
   }, [flowers, search]);
   const filteredBouquets = useMemo(() => {
+    const sorted = [...(bouquets || [])].sort(sortByName);
     const q = search.trim().toLowerCase();
-    if (!q) return bouquets;
-    return (bouquets || []).filter(b => b.name.toLowerCase().includes(q));
+    if (!q) return sorted;
+    return sorted.filter(b => b.name.toLowerCase().includes(q));
   }, [bouquets, search]);
 
   const listSize = subTab === 'flowers' ? flowers.length : (bouquets || []).length;
@@ -8987,6 +8996,28 @@ function TripCard({
                   </div>
                 )}
               </div>
+              {/* Price per line — optional. Running total at the bottom of
+                  the trip includes all items, checked or not, so she sees
+                  the full trip cost. */}
+              <div style={{ position: 'relative', width: '78px', flexShrink: 0, marginTop: '1px' }}>
+                <span style={{
+                  position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)',
+                  fontSize: '12px', color: C.inkFaint, pointerEvents: 'none',
+                }}>$</span>
+                <input type="number" inputMode="decimal" step="0.01" min="0"
+                  value={it.price ?? ''}
+                  onChange={(e) => onUpdateItem(trip.id, it.id, {
+                    price: e.target.value === '' ? undefined : parseFloat(e.target.value),
+                  })}
+                  placeholder="0.00"
+                  style={{
+                    width: '100%', padding: '6px 4px 6px 18px', fontSize: '13px',
+                    fontFamily: 'inherit', textAlign: 'right',
+                    background: 'transparent', border: `1px solid ${C.borderSoft}`, borderRadius: '6px',
+                    outline: 'none',
+                    color: it.checked ? C.inkFaint : C.ink,
+                  }} />
+              </div>
               <button onClick={() => onRemoveItem(trip.id, it.id)} aria-label="Remove"
                 style={{
                   background: 'transparent', border: 'none', padding: '6px',
@@ -8999,6 +9030,33 @@ function TripCard({
         })}
         </div>
       </div>
+
+      {(() => {
+        const itemsForTotal = trip.items || [];
+        const sum = itemsForTotal.reduce((s, it) => {
+          const n = Number(it.price);
+          return s + (isFinite(n) && n > 0 ? n : 0);
+        }, 0);
+        const priced = itemsForTotal.filter(it => Number(it.price) > 0).length;
+        if (priced === 0) return null;
+        return (
+          <div style={{
+            marginTop: '8px', padding: '10px 12px',
+            background: `${C.sage}18`, border: `1px solid ${C.sageDeep}44`,
+            borderRadius: '8px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            flexShrink: 0,
+          }}>
+            <div style={{ fontSize: '12px', color: C.inkSoft, letterSpacing: '0.02em' }}>
+              Trip total · {priced} of {itemsForTotal.length} priced
+            </div>
+            <div className="serif" style={{
+              fontSize: '20px', fontWeight: 600, color: C.sageDeep,
+              letterSpacing: '-0.01em',
+            }}>${sum.toFixed(2)}</div>
+          </div>
+        );
+      })()}
 
       </div>{/* end middle (items grid only) */}
 
@@ -10190,9 +10248,13 @@ function CartView({
     return map;
   }, [cart.items]);
 
-  const list = pickerTab === 'flowers' ? flowers
+  const rawList = pickerTab === 'flowers' ? flowers
     : pickerTab === 'materials' ? materials
     : (bouquets || []);
+  // Alphabetical A→Z so the picker stays predictable as the catalog grows.
+  const list = useMemo(() =>
+    [...(rawList || [])].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+  , [rawList]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return list;
