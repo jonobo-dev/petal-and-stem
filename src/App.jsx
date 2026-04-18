@@ -5772,6 +5772,136 @@ function RecipeEditor({
   );
 }
 
+// Full-screen catalog picker for the Shopping list. Tabs between flowers
+// and supplies, search narrows each tab's list, tap-to-add keeps the
+// overlay open so she can queue several items in one visit. Tapping
+// "Done" (or outside) closes. Each option displays its current catalog
+// price so she can see what she's pulling in before adding.
+function ShoppingCatalogOverlay({ options, search, setSearch, addedThisSession, onPick, onClose }) {
+  const [tab, setTab] = useState('flowers');
+  const flowers = useMemo(() => options.filter(o => o.kind === 'flower'), [options]);
+  const supplies = useMemo(() => options.filter(o => o.kind === 'material'), [options]);
+  const rawList = tab === 'flowers' ? flowers : supplies;
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rawList;
+    return rawList.filter(o => o.name.toLowerCase().includes(q));
+  }, [rawList, search]);
+  const added = useMemo(() => new Set(addedThisSession || []), [addedThisSession]);
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(42,53,40,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '20px', zIndex: 70, backdropFilter: 'blur(4px)',
+    }}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
+        background: C.card, borderRadius: '16px', padding: '18px',
+        width: '100%', maxWidth: '460px',
+        height: 'min(88vh, 640px)', overflow: 'hidden',
+        boxShadow: '0 20px 60px rgba(42,53,40,0.3)',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '12px' }}>
+          <div>
+            <h2 className="serif" style={{ fontSize: '20px', margin: '0 0 2px', fontWeight: 500, letterSpacing: '-0.01em' }}>
+              Add to trip
+            </h2>
+            <div style={{ fontSize: '12px', color: C.inkSoft }}>
+              Tap items to add — prices come from your catalog.
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{
+            background: 'transparent', border: 'none', padding: '8px', borderRadius: '8px',
+            cursor: 'pointer', color: C.inkSoft,
+          }}><X size={16} /></button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '4px', background: C.bgDeep, padding: '4px', borderRadius: '10px', marginBottom: '10px', flexShrink: 0 }}>
+          <button onClick={() => setTab('flowers')} style={{
+            flex: 1, padding: '8px', borderRadius: '8px', border: 'none',
+            background: tab === 'flowers' ? C.card : 'transparent',
+            color: tab === 'flowers' ? C.ink : C.inkSoft,
+            fontFamily: 'inherit', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+          }}>
+            <Flower2 size={13} strokeWidth={2} /> Flowers <span style={{ opacity: 0.55, fontWeight: 400 }}>{flowers.length}</span>
+          </button>
+          <button onClick={() => setTab('supplies')} style={{
+            flex: 1, padding: '8px', borderRadius: '8px', border: 'none',
+            background: tab === 'supplies' ? C.card : 'transparent',
+            color: tab === 'supplies' ? C.ink : C.inkSoft,
+            fontFamily: 'inherit', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+          }}>
+            <Tag size={13} strokeWidth={2} /> Supplies <span style={{ opacity: 0.55, fontWeight: 400 }}>{supplies.length}</span>
+          </button>
+        </div>
+
+        <div style={{ marginBottom: '10px', flexShrink: 0 }}>
+          <SearchBar value={search} onChange={setSearch}
+            placeholder={tab === 'flowers' ? 'Search flowers…' : 'Search supplies…'} />
+        </div>
+
+        <div className="no-scrollbar" style={{
+          flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px',
+        }}>
+          {visible.length === 0 ? (
+            <div style={{ padding: '24px', fontSize: '13px', color: C.inkFaint, fontStyle: 'italic', textAlign: 'center' }}>
+              {search.trim()
+                ? `No ${tab === 'flowers' ? 'flower' : 'supply'} matches "${search}".`
+                : `No ${tab === 'flowers' ? 'flowers' : 'supplies'} yet. Add some on the ${tab === 'flowers' ? 'Flowers' : 'Supplies'} tab first.`}
+            </div>
+          ) : visible.map(opt => {
+            const isAdded = added.has((opt.name || '').toLowerCase());
+            return (
+              <button key={`${opt.kind}:${opt.name}`} type="button"
+                onClick={() => onPick(opt)}
+                style={{
+                  width: '100%', padding: '10px 12px', marginBottom: '4px',
+                  background: isAdded ? `${C.sage}22` : 'transparent',
+                  border: `1px solid ${isAdded ? C.sage + '66' : C.borderSoft}`,
+                  borderRadius: '8px',
+                  fontFamily: 'inherit', fontSize: '14px', color: C.ink,
+                  cursor: 'pointer', textAlign: 'left',
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                }}>
+                {opt.kind === 'flower'
+                  ? <Flower2 size={14} strokeWidth={2} color={C.sageDeep} />
+                  : <Tag size={14} strokeWidth={2} color={C.inkSoft} />}
+                <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{opt.name}</span>
+                {typeof opt.price === 'number' && (
+                  <span style={{ fontSize: '12px', color: C.sageDeep, fontWeight: 600 }}>
+                    ${opt.price.toFixed(2)}
+                    <span style={{ color: C.inkFaint, fontWeight: 400 }}> {opt.hint}</span>
+                  </span>
+                )}
+                {isAdded && (
+                  <Check size={13} strokeWidth={2.6} color={C.sageDeep} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{
+          paddingTop: '10px', marginTop: '8px',
+          borderTop: `1px solid ${C.borderSoft}`, flexShrink: 0,
+        }}>
+          <button onClick={onClose} className="primary-btn" style={{
+            width: '100%', padding: '12px', background: C.sageDeep, border: 'none',
+            borderRadius: '10px', color: C.card, fontFamily: 'inherit', fontSize: '14px',
+            fontWeight: 600, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+          }}>
+            <Check size={14} strokeWidth={2.4} /> Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PickerOverlay({ flowers, materials, bouquets, itemsByKey, setItemQty, onAddNewFlower, onAddNewMaterial, onClose }) {
   const [pickerTab, setPickerTab] = useState('flowers');
   const [search, setSearch] = useState('');
@@ -8504,6 +8634,8 @@ function TripCard({
 }) {
   const [newItemLabel, setNewItemLabel] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [overlaySearch, setOverlaySearch] = useState('');
   const pickerRef = useRef(null);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -8513,15 +8645,34 @@ function TripCard({
   const isActive = variant === 'active';
 
   // Catalog options for the Add-item picker — flowers + supplies, sorted by
-  // kind then name. Shows the unit hint ("/stem", "/bunch", "each") so she
-  // knows what unit the price is in. Falls back to free text on Enter.
+  // kind then name. Each option carries its current catalog price so adding
+  // an item from here auto-fills the shopping row's $ input (she can still
+  // override after). Flowers use bunch price since she shops by the bunch;
+  // flats use the midpoint. Materials use unitPrice.
   const catalogOptions = useMemo(() => {
     const out = [];
     for (const f of (flowers || [])) {
-      out.push({ kind: 'flower', name: f.name, hint: f.mode === 'perStem' ? '/stem' : '/bunch' });
+      let price = null;
+      if (f.mode === 'perStem') {
+        const bp = Number(f.bunchPrice);
+        if (isFinite(bp) && bp > 0) price = bp;
+      } else {
+        const mn = Number(f.flatMin) || 0;
+        const mx = Number(f.flatMax) || 0;
+        if (mn > 0 || mx > 0) price = (mn + mx) / 2;
+      }
+      out.push({
+        kind: 'flower', name: f.name,
+        hint: f.mode === 'perStem' ? '/bunch' : '/bunch',
+        price,
+      });
     }
     for (const m of (materials || [])) {
-      out.push({ kind: 'material', name: m.name, hint: 'each' });
+      const p = Number(m.unitPrice);
+      out.push({
+        kind: 'material', name: m.name, hint: 'each',
+        price: isFinite(p) && p > 0 ? p : null,
+      });
     }
     return out.sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === 'flower' ? -1 : 1;
@@ -8542,9 +8693,15 @@ function TripCard({
   const addCatalogItem = (opt) => {
     const taggedCustomers = (filterCustomer !== 'all' && filterCustomer !== '__other__')
       ? [filterCustomer] : undefined;
-    onAddItem(trip.id, { label: `1 ${opt.name}`, forCustomers: taggedCustomers });
+    onAddItem(trip.id, {
+      label: opt.name,
+      forCustomers: taggedCustomers,
+      ...(typeof opt.price === 'number' && opt.price > 0 ? { price: opt.price } : {}),
+    });
     setNewItemLabel('');
     setPickerOpen(false);
+    setOverlayOpen(false);
+    setOverlaySearch('');
   };
 
   // Build a list of unique customer names — merges item-derived (restock-
@@ -9081,9 +9238,10 @@ function TripCard({
           background: C.bg, border: `1px dashed ${C.border}`,
         }}>
           <button onClick={() => {
-              // Typed text → add it. Empty + catalog exists → open picker.
+              // Typed text → add it. Empty → open full catalog overlay so she
+              // can browse tabs/search and add multiple items in one pass.
               if (newItemLabel.trim()) { addItem(); setPickerOpen(false); }
-              else if (catalogOptions.length > 0) setPickerOpen(o => !o);
+              else if (catalogOptions.length > 0) setOverlayOpen(true);
             }}
             aria-label={newItemLabel.trim() ? 'Add item' : 'Pick from catalog'}
             style={{
@@ -9106,7 +9264,11 @@ function TripCard({
               background: 'transparent', border: 'none', outline: 'none', color: C.ink,
             }} />
         </div>
-        {pickerOpen && catalogOptions.length > 0 && (
+        {/* Inline typeahead (small) — shown ONLY while she's typing, so a
+            partial name surfaces matches as she types. Tapping the + with
+            an empty input opens the full-screen catalog overlay below for
+            browsing everything. */}
+        {pickerOpen && newItemLabel.trim() && catalogOptions.length > 0 && (
           <div className="no-scrollbar" style={{
             position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30,
             background: C.card, border: `1px solid ${C.border}`, borderRadius: '10px',
@@ -9131,12 +9293,25 @@ function TripCard({
                   ? <Flower2 size={13} strokeWidth={2} color={C.sageDeep} />
                   : <Tag size={13} strokeWidth={2} color={C.inkSoft} />}
                 <span style={{ flex: 1, minWidth: 0 }}>{opt.name}</span>
-                <span style={{ fontSize: '11px', color: C.inkFaint }}>{opt.hint}</span>
+                <span style={{ fontSize: '11px', color: C.inkFaint }}>
+                  {opt.hint}{typeof opt.price === 'number' ? ` · $${opt.price.toFixed(2)}` : ''}
+                </span>
               </button>
             ))}
           </div>
         )}
       </div>
+
+      {overlayOpen && (
+        <ShoppingCatalogOverlay
+          options={catalogOptions}
+          search={overlaySearch}
+          setSearch={setOverlaySearch}
+          addedThisSession={(trip.items || []).map(it => (it.label || '').trim().toLowerCase())}
+          onPick={addCatalogItem}
+          onClose={() => { setOverlayOpen(false); setOverlaySearch(''); }}
+        />
+      )}
 
       {/* Notes — pinned above the footer at a fixed height. resize: none so
           the textarea can't be dragged taller (which would eat into the
