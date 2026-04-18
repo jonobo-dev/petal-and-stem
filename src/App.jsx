@@ -2071,6 +2071,14 @@ export default function App() {
            so each side scrolls independently without showing a track. */
         .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+        /* Desktop: Shopping trip card gets a taller fixed height so more
+           items show before she has to scroll. Mobile keeps the 620px
+           inline cap. */
+        @media (min-width: 880px) {
+          .trip-card {
+            height: min(880px, calc(100vh - 80px)) !important;
+          }
+        }
         /* Breakpoint raised to 880px (matches main content max-width) so
            the 2-column layout only kicks in when there's actually room for
            both columns — at 720px, the side column was so narrow that the
@@ -9013,13 +9021,13 @@ function TripCard({
   const headerLabel = isActive ? 'Active trip' : 'Scheduled';
 
   return (
-    <div style={{
+    <div className="trip-card" style={{
       background: C.card,
       border: `1px solid ${isActive ? C.sage + '88' : C.borderSoft}`,
       borderRadius: '14px', padding: '16px',
-      // Truly fixed height — the card never grows or shrinks based on how
-      // many items the list has. Items scroll inside the middle section.
-      // The min() lets it shrink on small viewports without breaking layout.
+      // Fixed card height — items scroll inside. Cap is lifted on
+      // wider viewports (see .trip-card media rule) so desktop users
+      // see more of the list at once without needing to scroll.
       height: 'min(620px, calc(100vh - 120px))',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
