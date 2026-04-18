@@ -5772,21 +5772,60 @@ function RecipeEditor({
   );
 }
 
-// Full-screen catalog picker for the Shopping list. Tabs between flowers
-// and supplies, search narrows each tab's list, tap-to-add keeps the
-// overlay open so she can queue several items in one visit. Tapping
-// "Done" (or outside) closes. Each option displays its current catalog
-// price so she can see what she's pulling in before adding.
-function ShoppingCatalogOverlay({ options, search, setSearch, addedThisSession, onPick, onClose }) {
+// Look up a shopping item's price from the catalog by matching its
+// label against flower and supply names (case-insensitive, trimmed).
+// Flowers use bunch-level price; supplies use unitPrice. Returns null
+// if no match or the matched entry has no price set. Used to auto-fill
+// the $ input on shopping rows so she doesn't re-type catalog prices.
+function matchCatalogPrice(label, flowers, materials) {
+  const key = (label || '').trim().toLowerCase();
+  if (!key) return null;
+  const f = (flowers || []).find(x => (x.name || '').toLowerCase() === key);
+  if (f) {
+    if (f.mode === 'perStem') {
+      const bp = Number(f.bunchPrice);
+      if (isFinite(bp) && bp > 0) return bp;
+    } else {
+      const mn = Number(f.flatMin) || 0;
+      const mx = Number(f.flatMax) || 0;
+      if (mn > 0 || mx > 0) return (mn + mx) / 2;
+    }
+  }
+  const m = (materials || []).find(x => (x.name || '').toLowerCase() === key);
+  if (m) {
+    const p = Number(m.unitPrice);
+    if (isFinite(p) && p > 0) return p;
+  }
+  return null;
+}
+
+// Full-screen catalog picker for the Shopping list. Tabs between flowers,
+// supplies, and bouquets. Flowers/supplies add a single line; bouquets
+// expand into their ingredients so a "Spring mix" pulls in all its
+// flowers + supplies as separate shopping lines with their catalog
+// prices pre-filled. Overlay stays open so she can add several items
+// before tapping Done.
+function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search, setSearch, addedThisSession, onPick, onPickBouquet, onClose }) {
   const [tab, setTab] = useState('flowers');
-  const flowers = useMemo(() => options.filter(o => o.kind === 'flower'), [options]);
-  const supplies = useMemo(() => options.filter(o => o.kind === 'material'), [options]);
-  const rawList = tab === 'flowers' ? flowers : supplies;
+  const flowerOpts = useMemo(() => options.filter(o => o.kind === 'flower'), [options]);
+  const supplyOpts = useMemo(() => options.filter(o => o.kind === 'material'), [options]);
+  const sortedBouquets = useMemo(() =>
+    [...(bouquets || [])].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+  , [bouquets]);
+  const rawList = tab === 'flowers' ? flowerOpts
+    : tab === 'supplies' ? supplyOpts
+    : null; // 'bouquets' branch handled separately
   const visible = useMemo(() => {
+    if (!rawList) return [];
     const q = search.trim().toLowerCase();
     if (!q) return rawList;
     return rawList.filter(o => o.name.toLowerCase().includes(q));
   }, [rawList, search]);
+  const visibleBouquets = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sortedBouquets;
+    return sortedBouquets.filter(b => (b.name || '').toLowerCase().includes(q));
+  }, [sortedBouquets, search]);
   const added = useMemo(() => new Set(addedThisSession || []), [addedThisSession]);
 
   return (
@@ -5819,69 +5858,113 @@ function ShoppingCatalogOverlay({ options, search, setSearch, addedThisSession, 
 
         <div style={{ display: 'flex', gap: '4px', background: C.bgDeep, padding: '4px', borderRadius: '10px', marginBottom: '10px', flexShrink: 0 }}>
           <button onClick={() => setTab('flowers')} style={{
-            flex: 1, padding: '8px', borderRadius: '8px', border: 'none',
+            flex: 1, padding: '8px 4px', borderRadius: '8px', border: 'none',
             background: tab === 'flowers' ? C.card : 'transparent',
             color: tab === 'flowers' ? C.ink : C.inkSoft,
-            fontFamily: 'inherit', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            fontFamily: 'inherit', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
           }}>
-            <Flower2 size={13} strokeWidth={2} /> Flowers <span style={{ opacity: 0.55, fontWeight: 400 }}>{flowers.length}</span>
+            <Flower2 size={12} strokeWidth={2} /> Flowers <span style={{ opacity: 0.55, fontWeight: 400 }}>{flowerOpts.length}</span>
           </button>
           <button onClick={() => setTab('supplies')} style={{
-            flex: 1, padding: '8px', borderRadius: '8px', border: 'none',
+            flex: 1, padding: '8px 4px', borderRadius: '8px', border: 'none',
             background: tab === 'supplies' ? C.card : 'transparent',
             color: tab === 'supplies' ? C.ink : C.inkSoft,
-            fontFamily: 'inherit', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            fontFamily: 'inherit', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
           }}>
-            <Tag size={13} strokeWidth={2} /> Supplies <span style={{ opacity: 0.55, fontWeight: 400 }}>{supplies.length}</span>
+            <Tag size={12} strokeWidth={2} /> Supplies <span style={{ opacity: 0.55, fontWeight: 400 }}>{supplyOpts.length}</span>
+          </button>
+          <button onClick={() => setTab('bouquets')} style={{
+            flex: 1, padding: '8px 4px', borderRadius: '8px', border: 'none',
+            background: tab === 'bouquets' ? C.card : 'transparent',
+            color: tab === 'bouquets' ? C.ink : C.inkSoft,
+            fontFamily: 'inherit', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+          }}>
+            <Sheet size={12} strokeWidth={2} /> Bouquets <span style={{ opacity: 0.55, fontWeight: 400 }}>{sortedBouquets.length}</span>
           </button>
         </div>
 
         <div style={{ marginBottom: '10px', flexShrink: 0 }}>
           <SearchBar value={search} onChange={setSearch}
-            placeholder={tab === 'flowers' ? 'Search flowers…' : 'Search supplies…'} />
+            placeholder={tab === 'flowers' ? 'Search flowers…'
+              : tab === 'supplies' ? 'Search supplies…'
+              : 'Search bouquets…'} />
         </div>
 
         <div className="no-scrollbar" style={{
           flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px',
         }}>
-          {visible.length === 0 ? (
-            <div style={{ padding: '24px', fontSize: '13px', color: C.inkFaint, fontStyle: 'italic', textAlign: 'center' }}>
-              {search.trim()
-                ? `No ${tab === 'flowers' ? 'flower' : 'supply'} matches "${search}".`
-                : `No ${tab === 'flowers' ? 'flowers' : 'supplies'} yet. Add some on the ${tab === 'flowers' ? 'Flowers' : 'Supplies'} tab first.`}
-            </div>
-          ) : visible.map(opt => {
-            const isAdded = added.has((opt.name || '').toLowerCase());
-            return (
-              <button key={`${opt.kind}:${opt.name}`} type="button"
-                onClick={() => onPick(opt)}
-                style={{
-                  width: '100%', padding: '10px 12px', marginBottom: '4px',
-                  background: isAdded ? `${C.sage}22` : 'transparent',
-                  border: `1px solid ${isAdded ? C.sage + '66' : C.borderSoft}`,
-                  borderRadius: '8px',
-                  fontFamily: 'inherit', fontSize: '14px', color: C.ink,
-                  cursor: 'pointer', textAlign: 'left',
-                  display: 'flex', alignItems: 'center', gap: '10px',
-                }}>
-                {opt.kind === 'flower'
-                  ? <Flower2 size={14} strokeWidth={2} color={C.sageDeep} />
-                  : <Tag size={14} strokeWidth={2} color={C.inkSoft} />}
-                <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{opt.name}</span>
-                {typeof opt.price === 'number' && (
-                  <span style={{ fontSize: '12px', color: C.sageDeep, fontWeight: 600 }}>
-                    ${opt.price.toFixed(2)}
-                    <span style={{ color: C.inkFaint, fontWeight: 400 }}> {opt.hint}</span>
-                  </span>
-                )}
-                {isAdded && (
-                  <Check size={13} strokeWidth={2.6} color={C.sageDeep} />
-                )}
-              </button>
-            );
-          })}
+          {tab === 'bouquets' ? (
+            visibleBouquets.length === 0 ? (
+              <div style={{ padding: '24px', fontSize: '13px', color: C.inkFaint, fontStyle: 'italic', textAlign: 'center' }}>
+                {search.trim()
+                  ? `No bouquet matches "${search}".`
+                  : 'No saved bouquets yet. Save arrangements as bouquets on the Flowers tab to reuse them here.'}
+              </div>
+            ) : visibleBouquets.map(bq => {
+              const itemCount = (bq.items || []).filter(it => it.included !== false && it.kind !== 'bouquet').length;
+              return (
+                <button key={bq.id} type="button"
+                  onClick={() => onPickBouquet(bq)}
+                  style={{
+                    width: '100%', padding: '10px 12px', marginBottom: '4px',
+                    background: 'transparent',
+                    border: `1px solid ${C.borderSoft}`, borderRadius: '8px',
+                    fontFamily: 'inherit', fontSize: '14px', color: C.ink,
+                    cursor: 'pointer', textAlign: 'left',
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                  }}>
+                  <Sheet size={14} strokeWidth={2} color={C.sageDeep} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500 }}>{bq.name || 'Untitled bouquet'}</div>
+                    <div style={{ fontSize: '11px', color: C.inkFaint, marginTop: '2px' }}>
+                      Drops {itemCount} item{itemCount === 1 ? '' : 's'} into the trip
+                    </div>
+                  </div>
+                  <Plus size={14} strokeWidth={2.4} color={C.sageDeep} />
+                </button>
+              );
+            })
+          ) : (
+            visible.length === 0 ? (
+              <div style={{ padding: '24px', fontSize: '13px', color: C.inkFaint, fontStyle: 'italic', textAlign: 'center' }}>
+                {search.trim()
+                  ? `No ${tab === 'flowers' ? 'flower' : 'supply'} matches "${search}".`
+                  : `No ${tab === 'flowers' ? 'flowers' : 'supplies'} yet. Add some on the ${tab === 'flowers' ? 'Flowers' : 'Supplies'} tab first.`}
+              </div>
+            ) : visible.map(opt => {
+              const isAdded = added.has((opt.name || '').toLowerCase());
+              return (
+                <button key={`${opt.kind}:${opt.name}`} type="button"
+                  onClick={() => onPick(opt)}
+                  style={{
+                    width: '100%', padding: '10px 12px', marginBottom: '4px',
+                    background: isAdded ? `${C.sage}22` : 'transparent',
+                    border: `1px solid ${isAdded ? C.sage + '66' : C.borderSoft}`,
+                    borderRadius: '8px',
+                    fontFamily: 'inherit', fontSize: '14px', color: C.ink,
+                    cursor: 'pointer', textAlign: 'left',
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                  }}>
+                  {opt.kind === 'flower'
+                    ? <Flower2 size={14} strokeWidth={2} color={C.sageDeep} />
+                    : <Tag size={14} strokeWidth={2} color={C.inkSoft} />}
+                  <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{opt.name}</span>
+                  {typeof opt.price === 'number' && (
+                    <span style={{ fontSize: '12px', color: C.sageDeep, fontWeight: 600 }}>
+                      ${opt.price.toFixed(2)}
+                      <span style={{ color: C.inkFaint, fontWeight: 400 }}> {opt.hint}</span>
+                    </span>
+                  )}
+                  {isAdded && (
+                    <Check size={13} strokeWidth={2.6} color={C.sageDeep} />
+                  )}
+                </button>
+              );
+            })
+          )}
         </div>
 
         <div style={{
@@ -8627,7 +8710,7 @@ function TripReminderControl({ trip, onUpdate }) {
 //   - Footer button: "Complete trip" (active) vs "Start trip" (scheduled, gated by canStart)
 function TripCard({
   trip, variant, canStart,
-  flowers, materials, upcomingCustomers,
+  flowers, materials, bouquets, upcomingCustomers,
   knownStoreTags, onAddStoreTag, onDeleteStoreTag,
   onUpdate, onAddItem, onUpdateItem, onRemoveItem,
   onComplete, onStartScheduled, onDelete, onCancelActive,
@@ -9104,6 +9187,17 @@ function TripCard({
             ? `${it.qty > 1 ? it.qty + ' ' : ''}${it.unit ? it.unit + ' ' : ''}${it.label || ''}`
             : (it.label || '');
           const customers = Array.isArray(it.forCustomers) ? it.forCustomers.filter(Boolean) : [];
+          // If the user hasn't set a price but the item's label matches a
+          // flower or supply in the catalog, show that catalog price as the
+          // default. Tapping the input commits it to the item so she can
+          // edit from there without re-typing.
+          const catalogPrice = matchCatalogPrice(it.label, flowers, materials);
+          const hasSetPrice = typeof it.price === 'number' && isFinite(it.price);
+          const inputValue = hasSetPrice
+            ? String(it.price)
+            : (it.priceRaw !== undefined
+              ? it.priceRaw
+              : (typeof catalogPrice === 'number' ? catalogPrice.toFixed(2) : ''));
           return (
             <div key={it.id} style={{
               display: 'flex', alignItems: 'flex-start', gap: '10px',
@@ -9164,7 +9258,18 @@ function TripCard({
                   fontSize: '12px', color: C.inkFaint, pointerEvents: 'none',
                 }}>$</span>
                 <input type="text" inputMode="decimal"
-                  value={typeof it.price === 'number' && isFinite(it.price) ? String(it.price) : (it.priceRaw ?? '')}
+                  value={inputValue}
+                  onFocus={() => {
+                    // First tap on an auto-filled (catalog) price commits it to
+                    // the item so subsequent edits flow from the displayed value
+                    // rather than blanking when she types.
+                    if (!hasSetPrice && it.priceRaw === undefined && typeof catalogPrice === 'number') {
+                      onUpdateItem(trip.id, it.id, {
+                        price: catalogPrice,
+                        priceRaw: catalogPrice.toFixed(2),
+                      });
+                    }
+                  }}
                   onChange={(e) => {
                     const raw = e.target.value;
                     // Allow empty, digits, and one decimal point while typing.
@@ -9182,9 +9287,10 @@ function TripCard({
                   style={{
                     width: '100%', padding: '6px 4px 6px 18px', fontSize: '13px',
                     fontFamily: 'inherit', textAlign: 'right',
-                    background: 'transparent', border: `1px solid ${C.borderSoft}`, borderRadius: '6px',
+                    background: (!hasSetPrice && typeof catalogPrice === 'number') ? `${C.sage}0f` : 'transparent',
+                    border: `1px solid ${C.borderSoft}`, borderRadius: '6px',
                     outline: 'none',
-                    color: it.checked ? C.inkFaint : C.ink,
+                    color: it.checked ? C.inkFaint : (hasSetPrice ? C.ink : C.inkSoft),
                   }} />
               </div>
               <button onClick={() => onRemoveItem(trip.id, it.id)} aria-label="Remove"
@@ -9202,11 +9308,17 @@ function TripCard({
 
       {(() => {
         const itemsForTotal = trip.items || [];
-        const sum = itemsForTotal.reduce((s, it) => {
+        // Effective price = user-set price OR the catalog price for a
+        // matching flower/supply name. This way auto-filled prices still
+        // count toward the running total before she taps into any row.
+        const effective = (it) => {
           const n = Number(it.price);
-          return s + (isFinite(n) && n > 0 ? n : 0);
-        }, 0);
-        const priced = itemsForTotal.filter(it => Number(it.price) > 0).length;
+          if (isFinite(n) && n > 0) return n;
+          const cat = matchCatalogPrice(it.label, flowers, materials);
+          return typeof cat === 'number' ? cat : 0;
+        };
+        const sum = itemsForTotal.reduce((s, it) => s + effective(it), 0);
+        const priced = itemsForTotal.filter(it => effective(it) > 0).length;
         if (priced === 0) return null;
         return (
           <div style={{
@@ -9305,10 +9417,42 @@ function TripCard({
       {overlayOpen && (
         <ShoppingCatalogOverlay
           options={catalogOptions}
+          bouquets={bouquets || []}
+          flowers={flowers || []}
+          materials={materials || []}
           search={overlaySearch}
           setSearch={setOverlaySearch}
           addedThisSession={(trip.items || []).map(it => (it.label || '').trim().toLowerCase())}
           onPick={addCatalogItem}
+          onPickBouquet={(bouquet) => {
+            // Expand each ingredient into its own shopping line with
+            // auto-filled price from the flower/supply catalog. Nested
+            // bouquets inside bouquets are skipped — she shops for raw
+            // flowers, not built bouquets.
+            const taggedCustomers = (filterCustomer !== 'all' && filterCustomer !== '__other__')
+              ? [filterCustomer] : undefined;
+            const seen = new Map();
+            for (const it of (bouquet.items || [])) {
+              if (it.included === false) continue;
+              if (it.kind === 'bouquet') continue;
+              const ref = it.kind === 'flower'
+                ? (flowers || []).find(f => f.id === it.id)
+                : (materials || []).find(m => m.id === it.id);
+              if (!ref) continue;
+              const price = matchCatalogPrice(ref.name, flowers, materials);
+              // Merge duplicates (if a bouquet lists the same ingredient
+              // twice) so she gets one consolidated line per item.
+              const key = ref.name.toLowerCase();
+              if (seen.has(key)) continue;
+              seen.set(key, true);
+              onAddItem(trip.id, {
+                label: ref.name,
+                forCustomers: taggedCustomers,
+                fromBouquet: bouquet.name,
+                ...(typeof price === 'number' && price > 0 ? { price } : {}),
+              });
+            }
+          }}
           onClose={() => { setOverlayOpen(false); setOverlaySearch(''); }}
         />
       )}
@@ -9547,7 +9691,7 @@ function CompleteTripWarning({ uncheckedCount, totalCount, onCancel, onConfirm }
   );
 }
 
-function ShoppingView({ active, scheduled, past, flowers, materials, orders, settings, knownStoreTags, onAddStoreTag, onDeleteStoreTag, onStart, onSchedule, onStartScheduled, onCancelActive, onRestock, onUpdate, onAddItem, onUpdateItem, onRemoveItem, onComplete, onDelete }) {
+function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, orders, settings, knownStoreTags, onAddStoreTag, onDeleteStoreTag, onStart, onSchedule, onStartScheduled, onCancelActive, onRestock, onUpdate, onAddItem, onUpdateItem, onRemoveItem, onComplete, onDelete }) {
   // Live list of customer names with upcoming orders within the restock
   // horizon. Threaded into every TripCard so the rail reflects current
   // pickups even on trips created before extraCustomers was tracked.
@@ -9624,7 +9768,7 @@ function ShoppingView({ active, scheduled, past, flowers, materials, orders, set
           {active && (
             <TripCard
               trip={active} variant="active"
-              flowers={flowers} materials={materials}
+              flowers={flowers} materials={materials} bouquets={bouquets}
               upcomingCustomers={upcomingCustomerNames}
               knownStoreTags={knownStoreTags}
               onAddStoreTag={onAddStoreTag} onDeleteStoreTag={onDeleteStoreTag}
