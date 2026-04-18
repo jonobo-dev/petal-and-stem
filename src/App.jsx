@@ -8998,17 +8998,29 @@ function TripCard({
               </div>
               {/* Price per line — optional. Running total at the bottom of
                   the trip includes all items, checked or not, so she sees
-                  the full trip cost. */}
-              <div style={{ position: 'relative', width: '78px', flexShrink: 0, marginTop: '1px' }}>
+                  the full trip cost. `type=text` + inputMode=decimal gives
+                  a decimal keypad on mobile without the HTML5 number-input
+                  quirks (lost keystrokes when typing ".50"). */}
+              <div style={{ position: 'relative', width: '82px', flexShrink: 0, marginTop: '1px' }}>
                 <span style={{
                   position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)',
                   fontSize: '12px', color: C.inkFaint, pointerEvents: 'none',
                 }}>$</span>
-                <input type="number" inputMode="decimal" step="0.01" min="0"
-                  value={it.price ?? ''}
-                  onChange={(e) => onUpdateItem(trip.id, it.id, {
-                    price: e.target.value === '' ? undefined : parseFloat(e.target.value),
-                  })}
+                <input type="text" inputMode="decimal"
+                  value={typeof it.price === 'number' && isFinite(it.price) ? String(it.price) : (it.priceRaw ?? '')}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    // Allow empty, digits, and one decimal point while typing.
+                    if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                    const n = raw === '' ? null : parseFloat(raw);
+                    onUpdateItem(trip.id, it.id, {
+                      price: (n != null && isFinite(n)) ? n : undefined,
+                      // Keep raw string during in-progress entry (e.g. "3.")
+                      // so the user can finish typing without React snapping
+                      // the value back to a parsed number.
+                      priceRaw: raw === '' ? undefined : raw,
+                    });
+                  }}
                   placeholder="0.00"
                   style={{
                     width: '100%', padding: '6px 4px 6px 18px', fontSize: '13px',
