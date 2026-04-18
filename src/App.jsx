@@ -5805,8 +5805,13 @@ function matchCatalogPrice(label, flowers, materials) {
 // flowers + supplies as separate shopping lines with their catalog
 // prices pre-filled. Overlay stays open so she can add several items
 // before tapping Done.
-function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search, setSearch, addedThisSession, onPick, onPickBouquet, onClose }) {
+function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search, setSearch, addedThisSession, onCommit, onPickBouquet, onClose }) {
   const [tab, setTab] = useState('flowers');
+  // Staged selections — { "flower:Roses": { qty: 3, price: 12.00, opt } }
+  // Price defaults to catalog but user can override before confirming.
+  // Tapping Done iterates staged entries and calls onCommit() once per row.
+  const [staged, setStaged] = useState({});
+
   const flowerOpts = useMemo(() => options.filter(o => o.kind === 'flower'), [options]);
   const supplyOpts = useMemo(() => options.filter(o => o.kind === 'material'), [options]);
   const sortedBouquets = useMemo(() =>
@@ -5814,7 +5819,7 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
   , [bouquets]);
   const rawList = tab === 'flowers' ? flowerOpts
     : tab === 'supplies' ? supplyOpts
-    : null; // 'bouquets' branch handled separately
+    : null;
   const visible = useMemo(() => {
     if (!rawList) return [];
     const q = search.trim().toLowerCase();
@@ -5827,6 +5832,49 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
     return sortedBouquets.filter(b => (b.name || '').toLowerCase().includes(q));
   }, [sortedBouquets, search]);
   const added = useMemo(() => new Set(addedThisSession || []), [addedThisSession]);
+
+  const keyOf = (opt) => `${opt.kind}:${opt.name}`;
+  const getStaged = (opt) => staged[keyOf(opt)];
+  const setStagedFor = (opt, patch) => setStaged(prev => {
+    const k = keyOf(opt);
+    const cur = prev[k] || { qty: 0, price: typeof opt.price === 'number' ? opt.price : null };
+    const next = { ...cur, ...patch };
+    if ((next.qty || 0) <= 0) {
+      const { [k]: _, ...rest } = prev;
+      return rest;
+    }
+    return { ...prev, [k]: next };
+  });
+  const incQty = (opt) => {
+    const cur = getStaged(opt);
+    setStagedFor(opt, { qty: (cur?.qty || 0) + 1 });
+  };
+  const decQty = (opt) => {
+    const cur = getStaged(opt);
+    setStagedFor(opt, { qty: Math.max(0, (cur?.qty || 0) - 1) });
+  };
+  const stagedCount = Object.values(staged).reduce((s, v) => s + (v.qty || 0), 0);
+  const stagedSum = Object.values(staged).reduce((s, v) => s + (v.qty || 0) * (Number(v.price) || 0), 0);
+
+  const commitStaged = () => {
+    for (const [key, val] of Object.entries(staged)) {
+      if (!val.qty || val.qty <= 0) continue;
+      const [kind, ...rest] = key.split(':');
+      const name = rest.join(':');
+      const opt = { kind, name, price: Number(val.price) || null };
+      // Line total = qty × per-unit price. Label carries qty prefix so the
+      // trip row reads naturally (e.g. "3 Roses").
+      const lineTotal = val.qty * (Number(val.price) || 0);
+      onCommit({
+        opt,
+        qty: val.qty,
+        label: val.qty > 1 ? `${val.qty} ${name}` : name,
+        price: lineTotal > 0 ? lineTotal : null,
+      });
+    }
+    setStaged({});
+    onClose();
+  };
 
   return (
     <div onClick={onClose} style={{
@@ -5936,32 +5984,90 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
               </div>
             ) : visible.map(opt => {
               const isAdded = added.has((opt.name || '').toLowerCase());
+              const st = getStaged(opt);
+              const qty = st?.qty || 0;
+              const price = st ? st.price : (typeof opt.price === 'number' ? opt.price : null);
+              const isStaged = qty > 0;
               return (
-                <button key={`${opt.kind}:${opt.name}`} type="button"
-                  onClick={() => onPick(opt)}
-                  style={{
-                    width: '100%', padding: '10px 12px', marginBottom: '4px',
-                    background: isAdded ? `${C.sage}22` : 'transparent',
-                    border: `1px solid ${isAdded ? C.sage + '66' : C.borderSoft}`,
-                    borderRadius: '8px',
-                    fontFamily: 'inherit', fontSize: '14px', color: C.ink,
-                    cursor: 'pointer', textAlign: 'left',
-                    display: 'flex', alignItems: 'center', gap: '10px',
-                  }}>
+                <div key={`${opt.kind}:${opt.name}`} style={{
+                  padding: '8px 10px', marginBottom: '4px',
+                  background: isStaged ? `${C.sage}22` : (isAdded ? `${C.gold}11` : 'transparent'),
+                  border: `1px solid ${isStaged ? C.sageDeep : (isAdded ? C.gold + '55' : C.borderSoft)}`,
+                  borderRadius: '8px',
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                }}>
                   {opt.kind === 'flower'
-                    ? <Flower2 size={14} strokeWidth={2} color={C.sageDeep} />
-                    : <Tag size={14} strokeWidth={2} color={C.inkSoft} />}
-                  <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{opt.name}</span>
-                  {typeof opt.price === 'number' && (
-                    <span style={{ fontSize: '12px', color: C.sageDeep, fontWeight: 600 }}>
-                      ${opt.price.toFixed(2)}
-                      <span style={{ color: C.inkFaint, fontWeight: 400 }}> {opt.hint}</span>
-                    </span>
-                  )}
-                  {isAdded && (
-                    <Check size={13} strokeWidth={2.6} color={C.sageDeep} />
-                  )}
-                </button>
+                    ? <Flower2 size={13} strokeWidth={2} color={C.sageDeep} style={{ flexShrink: 0 }} />
+                    : <Tag size={13} strokeWidth={2} color={C.inkSoft} style={{ flexShrink: 0 }} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 500, color: C.ink, lineHeight: 1.2 }}>
+                      {opt.name}
+                      {isAdded && <span style={{ fontSize: '10px', color: C.gold, marginLeft: '6px' }}>· already on list</span>}
+                    </div>
+                    {/* Editable price input — defaults to catalog price. */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      marginTop: '2px',
+                    }}>
+                      <span style={{ fontSize: '11px', color: C.inkFaint }}>$</span>
+                      <input type="text" inputMode="decimal"
+                        value={price != null ? String(price) : ''}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                          const n = raw === '' ? null : parseFloat(raw);
+                          setStagedFor(opt, {
+                            price: (n != null && isFinite(n)) ? n : null,
+                            // Stage the row on first edit if the user is entering
+                            // a price without tapping + first.
+                            qty: qty > 0 ? qty : 1,
+                          });
+                        }}
+                        placeholder="0.00"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          width: '60px', padding: '2px 4px', fontSize: '11px',
+                          fontFamily: 'inherit',
+                          background: 'transparent',
+                          border: `1px solid ${C.borderSoft}`, borderRadius: '4px',
+                          outline: 'none',
+                          color: C.ink, textAlign: 'right',
+                        }} />
+                      <span style={{ fontSize: '10px', color: C.inkFaint }}>{opt.hint}</span>
+                    </div>
+                  </div>
+                  {/* Qty stepper */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                    <button type="button" onClick={() => decQty(opt)} disabled={qty === 0}
+                      aria-label="Decrease"
+                      style={{
+                        width: '28px', height: '28px', borderRadius: '50%',
+                        background: qty > 0 ? C.bgDeep : 'transparent',
+                        border: `1px solid ${C.borderSoft}`,
+                        color: qty > 0 ? C.ink : C.inkFaint,
+                        cursor: qty > 0 ? 'pointer' : 'not-allowed',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        opacity: qty > 0 ? 1 : 0.4,
+                      }}>
+                      <Minus size={12} strokeWidth={2.4} />
+                    </button>
+                    <div style={{
+                      minWidth: '22px', textAlign: 'center',
+                      fontSize: '13px', fontWeight: 600,
+                      color: qty > 0 ? C.sageDeep : C.inkFaint,
+                    }}>{qty}</div>
+                    <button type="button" onClick={() => incQty(opt)}
+                      aria-label="Increase"
+                      style={{
+                        width: '28px', height: '28px', borderRadius: '50%',
+                        background: C.sageDeep, border: 'none',
+                        color: C.card, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                      <Plus size={12} strokeWidth={2.6} />
+                    </button>
+                  </div>
+                </div>
               );
             })
           )}
@@ -5970,14 +6076,33 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
         <div style={{
           paddingTop: '10px', marginTop: '8px',
           borderTop: `1px solid ${C.borderSoft}`, flexShrink: 0,
+          display: 'flex', gap: '8px', alignItems: 'stretch',
         }}>
-          <button onClick={onClose} className="primary-btn" style={{
-            width: '100%', padding: '12px', background: C.sageDeep, border: 'none',
-            borderRadius: '10px', color: C.card, fontFamily: 'inherit', fontSize: '14px',
-            fontWeight: 600, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-          }}>
-            <Check size={14} strokeWidth={2.4} /> Done
+          {tab !== 'bouquets' && stagedCount > 0 && (
+            <div style={{
+              padding: '10px 12px',
+              background: `${C.sage}14`, border: `1px solid ${C.sageDeep}44`,
+              borderRadius: '10px', fontSize: '12px', color: C.inkSoft,
+              display: 'flex', alignItems: 'center', gap: '4px',
+            }}>
+              <span style={{ fontWeight: 600, color: C.sageDeep }}>{stagedCount}</span>
+              <span>· ${stagedSum.toFixed(2)}</span>
+            </div>
+          )}
+          <button
+            onClick={tab !== 'bouquets' && stagedCount > 0 ? commitStaged : onClose}
+            className="primary-btn"
+            style={{
+              flex: 1, padding: '12px',
+              background: C.sageDeep, border: 'none',
+              borderRadius: '10px', color: C.card, fontFamily: 'inherit', fontSize: '14px',
+              fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+            }}>
+            <Check size={14} strokeWidth={2.4} />
+            {tab !== 'bouquets' && stagedCount > 0
+              ? `Add ${stagedCount} to trip`
+              : 'Done'}
           </button>
         </div>
       </div>
@@ -9441,7 +9566,15 @@ function TripCard({
           search={overlaySearch}
           setSearch={setOverlaySearch}
           addedThisSession={(trip.items || []).map(it => (it.label || '').trim().toLowerCase())}
-          onPick={addCatalogItem}
+          onCommit={({ qty, label, price }) => {
+            const taggedCustomers = (filterCustomer !== 'all' && filterCustomer !== '__other__')
+              ? [filterCustomer] : undefined;
+            onAddItem(trip.id, {
+              label,
+              forCustomers: taggedCustomers,
+              ...(typeof price === 'number' && price > 0 ? { price } : {}),
+            });
+          }}
           onPickBouquet={(bouquet) => {
             // Expand each ingredient into its own shopping line with
             // auto-filled price from the flower/supply catalog. Nested
