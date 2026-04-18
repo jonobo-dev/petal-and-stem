@@ -2079,6 +2079,23 @@ export default function App() {
             height: min(880px, calc(100vh - 80px)) !important;
           }
         }
+
+        /* Page entrance — subtle stagger on the top-level chrome as the
+           app hydrates. Plays once per page load. Disabled under
+           prefers-reduced-motion. Desktop gets a slightly longer offset
+           since the motion reads better on a bigger canvas. */
+        @keyframes entranceUp {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .app-header { animation: entranceUp 360ms ease-out both; }
+        .app-tabs   { animation: entranceUp 360ms ease-out 80ms both; }
+        .app-main   { animation: entranceUp 420ms ease-out 140ms both; }
+        @media (prefers-reduced-motion: reduce) {
+          .app-header, .app-tabs, .app-main {
+            animation: none !important;
+          }
+        }
         /* Breakpoint raised to 880px (matches main content max-width) so
            the 2-column layout only kicks in when there's actually room for
            both columns — at 720px, the side column was so narrow that the
