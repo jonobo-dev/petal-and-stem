@@ -8967,56 +8967,14 @@ function TripCard({
   // Under "All", group items with the same noun so duplicate flowers across
   // customers fold into one row with combined qty. Other filters keep items
   // separate so the user can see/edit each individually.
-  const visibleItems = useMemo(() => {
-    if (filterCustomer !== 'all' || filteredItems.length === 0) {
-      return filteredItems.map(it => ({ ...it, _ids: [it.id] }));
-    }
-    const groups = new Map();
-    for (const it of filteredItems) {
-      const parsed = parseLabel(it.label);
-      const key = parsed.noun || it.id;
-      const itPrice = Number(it.price);
-      if (!groups.has(key)) {
-        groups.set(key, {
-          ...it,
-          _ids: [it.id],
-          _parsed: parsed,
-          _totalQty: parsed.qty,
-          _forCustomers: new Set(it.forCustomers || []),
-          _allChecked: !!it.checked,
-          _priceSum: isFinite(itPrice) && itPrice > 0 ? itPrice : 0,
-          _pricedCount: isFinite(itPrice) && itPrice > 0 ? 1 : 0,
-          _priceRawSingle: it.priceRaw,
-        });
-      } else {
-        const g = groups.get(key);
-        g._ids.push(it.id);
-        g._totalQty += parsed.qty;
-        for (const c of (it.forCustomers || [])) g._forCustomers.add(c);
-        if (!it.checked) g._allChecked = false;
-        if (isFinite(itPrice) && itPrice > 0) {
-          g._priceSum += itPrice;
-          g._pricedCount += 1;
-        }
-      }
-    }
-    return Array.from(groups.values()).map(g => ({
-      // Synthesize a display item: combined label, merged forCustomers, and
-      // _ids array for cascading check/remove. Mark _isMerged when grouped.
-      // Preserve price fields so the $ input and trip total keep working in
-      // the "all" grouping view — merged items sum their line totals.
-      id: g._ids[0],
-      label: g._ids.length > 1
-        ? `${g._totalQty} ${g._parsed.display}`
-        : g.label,
-      checked: g._allChecked,
-      forCustomers: Array.from(g._forCustomers),
-      price: g._pricedCount > 0 ? g._priceSum : undefined,
-      priceRaw: g._ids.length === 1 ? g._priceRawSingle : undefined,
-      _ids: g._ids,
-      _isMerged: g._ids.length > 1,
-    }));
-  }, [filteredItems, filterCustomer]);
+  // Show every item as its own row. Prior versions merged duplicate labels
+  // in the "all customers" view to reduce clutter, but that broke per-row
+  // check/price edits (only the first underlying item got toggled, and
+  // the input had to be read-only to stay consistent). Individual rows
+  // are simpler; she can still filter by customer if the list gets long.
+  const visibleItems = useMemo(() =>
+    filteredItems.map(it => ({ ...it, _ids: [it.id] }))
+  , [filteredItems]);
 
   // Complete-trip with unchecked items: show a confirmation modal unless the
   // user has previously checked "don't show again" (stored in localStorage).
@@ -9396,10 +9354,7 @@ function TripCard({
                 }}>$</span>
                 <input type="text" inputMode="decimal"
                   value={inputValue}
-                  readOnly={!!it._isMerged}
-                  title={it._isMerged ? 'Sum of merged lines — filter by customer to edit individually' : undefined}
                   onFocus={() => {
-                    if (it._isMerged) return;
                     // First tap on an auto-filled (catalog) price commits it to
                     // the item so subsequent edits flow from the displayed value
                     // rather than blanking when she types.
@@ -9411,16 +9366,11 @@ function TripCard({
                     }
                   }}
                   onChange={(e) => {
-                    if (it._isMerged) return;
                     const raw = e.target.value;
-                    // Allow empty, digits, and one decimal point while typing.
                     if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
                     const n = raw === '' ? null : parseFloat(raw);
                     onUpdateItem(trip.id, it.id, {
                       price: (n != null && isFinite(n)) ? n : undefined,
-                      // Keep raw string during in-progress entry (e.g. "3.")
-                      // so the user can finish typing without React snapping
-                      // the value back to a parsed number.
                       priceRaw: raw === '' ? undefined : raw,
                     });
                   }}
@@ -9428,12 +9378,10 @@ function TripCard({
                   style={{
                     width: '100%', padding: '6px 4px 6px 18px', fontSize: '13px',
                     fontFamily: 'inherit', textAlign: 'right',
-                    background: it._isMerged ? C.bgDeep
-                      : ((!hasSetPrice && typeof catalogPrice === 'number') ? `${C.sage}0f` : 'transparent'),
+                    background: (!hasSetPrice && typeof catalogPrice === 'number') ? `${C.sage}0f` : 'transparent',
                     border: `1px solid ${C.borderSoft}`, borderRadius: '6px',
                     outline: 'none',
                     color: it.checked ? C.inkFaint : (hasSetPrice ? C.ink : C.inkSoft),
-                    cursor: it._isMerged ? 'not-allowed' : 'text',
                   }} />
               </div>
               <button onClick={() => onRemoveItem(trip.id, it.id)} aria-label="Remove"
@@ -9565,7 +9513,13 @@ function TripCard({
           materials={materials || []}
           search={overlaySearch}
           setSearch={setOverlaySearch}
-          addedThisSession={(trip.items || []).map(it => (it.label || '').trim().toLowerCase())}
+          addedThisSession={(trip.items || []).map(it => {
+            // Strip qty prefix via parseLabel so overlay matches by noun:
+            // a trip row labelled "2 Roses" should still flag the catalog
+            // "Roses" option as "already on list".
+            const noun = (parseLabel(it.label || '').noun || it.label || '').trim().toLowerCase();
+            return noun;
+          })}
           onCommit={({ qty, label, price }) => {
             const taggedCustomers = (filterCustomer !== 'all' && filterCustomer !== '__other__')
               ? [filterCustomer] : undefined;
