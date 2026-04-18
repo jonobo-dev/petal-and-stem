@@ -8850,6 +8850,7 @@ function TripCard({
     for (const it of filteredItems) {
       const parsed = parseLabel(it.label);
       const key = parsed.noun || it.id;
+      const itPrice = Number(it.price);
       if (!groups.has(key)) {
         groups.set(key, {
           ...it,
@@ -8858,6 +8859,9 @@ function TripCard({
           _totalQty: parsed.qty,
           _forCustomers: new Set(it.forCustomers || []),
           _allChecked: !!it.checked,
+          _priceSum: isFinite(itPrice) && itPrice > 0 ? itPrice : 0,
+          _pricedCount: isFinite(itPrice) && itPrice > 0 ? 1 : 0,
+          _priceRawSingle: it.priceRaw,
         });
       } else {
         const g = groups.get(key);
@@ -8865,17 +8869,25 @@ function TripCard({
         g._totalQty += parsed.qty;
         for (const c of (it.forCustomers || [])) g._forCustomers.add(c);
         if (!it.checked) g._allChecked = false;
+        if (isFinite(itPrice) && itPrice > 0) {
+          g._priceSum += itPrice;
+          g._pricedCount += 1;
+        }
       }
     }
     return Array.from(groups.values()).map(g => ({
       // Synthesize a display item: combined label, merged forCustomers, and
       // _ids array for cascading check/remove. Mark _isMerged when grouped.
+      // Preserve price fields so the $ input and trip total keep working in
+      // the "all" grouping view — merged items sum their line totals.
       id: g._ids[0],
       label: g._ids.length > 1
         ? `${g._totalQty} ${g._parsed.display}`
         : g.label,
       checked: g._allChecked,
       forCustomers: Array.from(g._forCustomers),
+      price: g._pricedCount > 0 ? g._priceSum : undefined,
+      priceRaw: g._ids.length === 1 ? g._priceRawSingle : undefined,
       _ids: g._ids,
       _isMerged: g._ids.length > 1,
     }));
@@ -9259,7 +9271,10 @@ function TripCard({
                 }}>$</span>
                 <input type="text" inputMode="decimal"
                   value={inputValue}
+                  readOnly={!!it._isMerged}
+                  title={it._isMerged ? 'Sum of merged lines — filter by customer to edit individually' : undefined}
                   onFocus={() => {
+                    if (it._isMerged) return;
                     // First tap on an auto-filled (catalog) price commits it to
                     // the item so subsequent edits flow from the displayed value
                     // rather than blanking when she types.
@@ -9271,6 +9286,7 @@ function TripCard({
                     }
                   }}
                   onChange={(e) => {
+                    if (it._isMerged) return;
                     const raw = e.target.value;
                     // Allow empty, digits, and one decimal point while typing.
                     if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
@@ -9287,10 +9303,12 @@ function TripCard({
                   style={{
                     width: '100%', padding: '6px 4px 6px 18px', fontSize: '13px',
                     fontFamily: 'inherit', textAlign: 'right',
-                    background: (!hasSetPrice && typeof catalogPrice === 'number') ? `${C.sage}0f` : 'transparent',
+                    background: it._isMerged ? C.bgDeep
+                      : ((!hasSetPrice && typeof catalogPrice === 'number') ? `${C.sage}0f` : 'transparent'),
                     border: `1px solid ${C.borderSoft}`, borderRadius: '6px',
                     outline: 'none',
                     color: it.checked ? C.inkFaint : (hasSetPrice ? C.ink : C.inkSoft),
+                    cursor: it._isMerged ? 'not-allowed' : 'text',
                   }} />
               </div>
               <button onClick={() => onRemoveItem(trip.id, it.id)} aria-label="Remove"
