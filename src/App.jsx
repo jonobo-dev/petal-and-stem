@@ -435,6 +435,10 @@ export default function App() {
   const toastTimerRef = useRef(null);
   const undoTimerRef = useRef(null);
   const cartFinalizeRef = useRef(false);
+  // Measured height of the sticky app chrome (header + tabs). Exposed as a CSS
+  // variable so sticky children inside each tab (e.g. the Shopping restock
+  // banner) can offset themselves to sit right below the chrome.
+  const chromeRef = useRef(null);
 
   const showToast = (msg, kind = 'error') => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -460,6 +464,21 @@ export default function App() {
   };
 
   useEffect(() => { loadAll(); }, []);
+
+  // Publish the sticky chrome's height as --chrome-h so sticky children inside
+  // tabs can sit just below the chrome instead of being covered by it. Re-measured
+  // on resize since header height grows/shrinks with business-name length.
+  useEffect(() => {
+    const el = chromeRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const update = () => {
+      document.documentElement.style.setProperty('--chrome-h', `${el.offsetHeight}px`);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Keep the document title (used by browser tab + print headers) in sync with the business name.
   useEffect(() => {
@@ -967,6 +986,19 @@ export default function App() {
     saveFlowers(editingId ? flowers.map(f => f.id === editingId ? entry : f) : [...flowers, entry]);
     resetForm();
   };
+  // Fast path for "I'm mid-trip and want this in the catalog now" — creates a
+  // minimal flat-priced flower so she can finish shopping, fill in details later.
+  const quickCreateFlower = (rawName) => {
+    const name = (rawName || '').trim();
+    if (!name) return null;
+    if (flowers.some(f => (f.name || '').toLowerCase() === name.toLowerCase())) return null;
+    const entry = {
+      id: `f-${Date.now()}`, name, mode: 'flat',
+      flatMin: 0, flatMax: 0, priceHistory: [],
+    };
+    saveFlowers([...flowers, entry]);
+    return entry;
+  };
   // Strip dangling cart-shape items pointing at a deleted catalog entry.
   const pruneOrderDraftItems = (kind, idSet) => {
     if (!Array.isArray(orderForm.items) || orderForm.items.length === 0) return;
@@ -1037,6 +1069,17 @@ export default function App() {
     };
     saveMaterials(editingMaterialId ? materials.map(m => m.id === editingMaterialId ? entry : m) : [...materials, entry]);
     resetMaterialForm();
+  };
+  const quickCreateMaterial = (rawName) => {
+    const name = (rawName || '').trim();
+    if (!name) return null;
+    if (materials.some(m => (m.name || '').toLowerCase() === name.toLowerCase())) return null;
+    const entry = {
+      id: `m-${Date.now()}`, name,
+      type: 'ribbon', color: '#F5E6D3', unitPrice: 0,
+    };
+    saveMaterials([...materials, entry]);
+    return entry;
   };
   const deleteMaterial = (id) => {
     const m = materials.find(x => x.id === id);
@@ -1829,7 +1872,49 @@ export default function App() {
   };
   const addShoppingItem = (id, item) => {
     const session = shopping.find(s => s.id === id); if (!session) return;
-    const next = [...(session.items || []), { id: `si-${Date.now()}`, label: '', qty: 1, unit: '', checked: false, ...item }];
+    // Collapse duplicates at the point of adding — if an unchecked row with
+    // the same noun AND the same customer tagging already exists, bump its
+    // qty and merge prices instead of appending a second row. Keeps the trip
+    // tidy when she re-adds the same flower mid-shop.
+    const parseQtyNoun = (label) => {
+      const m = (label || '').trim().match(/^(\d+)\s+(.+)$/);
+      if (!m) return { qty: 1, noun: (label || '').trim().toLowerCase() };
+      return { qty: parseInt(m[1]) || 1, noun: m[2].trim().toLowerCase() };
+    };
+    const tagKey = (arr) => Array.isArray(arr) && arr.length > 0
+      ? [...arr].map(s => (s || '').toLowerCase()).sort().join('|')
+      : '';
+    const incomingParsed = parseQtyNoun(item.label || '');
+    const incomingTag = tagKey(item.forCustomers);
+    const items = session.items || [];
+    const matchIdx = items.findIndex(ex => {
+      if (ex.checked) return false;
+      if (tagKey(ex.forCustomers) !== incomingTag) return false;
+      const exParsed = parseQtyNoun(ex.label || '');
+      return exParsed.noun && exParsed.noun === incomingParsed.noun;
+    });
+    if (matchIdx >= 0 && incomingParsed.noun) {
+      const existing = items[matchIdx];
+      const existingParsed = parseQtyNoun(existing.label || '');
+      const newQty = existingParsed.qty + incomingParsed.qty;
+      const newLabel = newQty > 1 ? `${newQty} ${existingParsed.noun === incomingParsed.noun ? (existing.label.match(/^\d+\s+(.+)$/)?.[1] || incomingParsed.noun) : incomingParsed.noun}` : incomingParsed.noun;
+      const existingPrice = typeof existing.price === 'number' ? existing.price : 0;
+      const incomingPrice = typeof item.price === 'number' ? item.price : 0;
+      const mergedPrice = (existingPrice + incomingPrice) || null;
+      const mergedOrderIds = Array.from(new Set([
+        ...(Array.isArray(existing.forOrderIds) ? existing.forOrderIds : []),
+        ...(Array.isArray(item.forOrderIds) ? item.forOrderIds : []),
+      ]));
+      const next = items.map((it, i) => i === matchIdx ? {
+        ...it,
+        label: newLabel,
+        ...(mergedPrice != null ? { price: mergedPrice } : {}),
+        ...(mergedOrderIds.length > 0 ? { forOrderIds: mergedOrderIds } : {}),
+      } : it);
+      updateShoppingSession(id, { items: next });
+      return;
+    }
+    const next = [...items, { id: `si-${Date.now()}`, label: '', qty: 1, unit: '', checked: false, ...item }];
     updateShoppingSession(id, { items: next });
   };
   const updateShoppingItem = (sessionId, itemId, patch) => {
@@ -1986,6 +2071,10 @@ export default function App() {
         .lookup-btn:hover:not(:disabled) { background: ${C.ink}; color: ${C.card}; }
         .text-input { transition: border-color 160ms ease, background 160ms ease; }
         .text-input:focus { outline: none; border-color: ${C.sageDeep}; background: ${C.card}; }
+        /* Hide browser-native "X" on type=search so SearchBar's own clear button
+           doesn't double up. */
+        .text-input[type="search"]::-webkit-search-cancel-button,
+        .text-input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
         .note-chip, .payment-chip { transition: all 140ms ease; }
         .note-chip:hover { background: ${C.sage}; color: ${C.card}; border-color: ${C.sage}; }
         .transfer-btn { transition: all 180ms ease; }
@@ -2263,7 +2352,7 @@ export default function App() {
 
       {/* Sticky chrome: business header + tab strip stay pinned to the top
           while the page scrolls. Solid bg so cards scroll cleanly beneath. */}
-      <div style={{
+      <div ref={chromeRef} style={{
         position: 'sticky', top: 0, zIndex: 40,
         background: C.bg,
         borderBottom: `1px solid ${C.borderSoft}`,
@@ -2455,6 +2544,8 @@ export default function App() {
             onRemoveItem={removeShoppingItem}
             onComplete={completeShoppingSession}
             onDelete={deleteShoppingSession}
+            onCreateFlower={quickCreateFlower}
+            onCreateMaterial={quickCreateMaterial}
           />
         ) : (
           <OrdersView
@@ -5830,12 +5921,29 @@ function matchCatalogPrice(label, flowers, materials) {
 // flowers + supplies as separate shopping lines with their catalog
 // prices pre-filled. Overlay stays open so she can add several items
 // before tapping Done.
-function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search, setSearch, addedThisSession, onCommit, onPickBouquet, onClose }) {
+function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search, setSearch, existingByName, onCommit, onPickBouquet, onCreateFlower, onCreateMaterial, onClose }) {
   const [tab, setTab] = useState('flowers');
-  // Staged selections — { "flower:Roses": { qty: 3, price: 12.00, opt } }
-  // Price defaults to catalog but user can override before confirming.
-  // Tapping Done iterates staged entries and calls onCommit() once per row.
-  const [staged, setStaged] = useState({});
+  // Staged selections — { "flower:Roses": { qty: 3, price: 12.00, initialQty, initialPrice, existingItemId } }
+  // Seeded from what's already on the trip so she sees her current state;
+  // tweaking qty/price up or down syncs back to that row on commit.
+  // existingItemId (if any) flags the entry as an update target — qty=0 means
+  // "remove it". Entries without existingItemId are new additions.
+  const [staged, setStaged] = useState(() => {
+    if (!existingByName || existingByName.size === 0) return {};
+    const initial = {};
+    for (const opt of (options || [])) {
+      const match = existingByName.get((opt.name || '').toLowerCase());
+      if (!match) continue;
+      initial[`${opt.kind}:${opt.name}`] = {
+        qty: match.qty,
+        price: match.price,
+        initialQty: match.qty,
+        initialPrice: match.price,
+        existingItemId: match.itemId,
+      };
+    }
+    return initial;
+  });
 
   const flowerOpts = useMemo(() => options.filter(o => o.kind === 'flower'), [options]);
   const supplyOpts = useMemo(() => options.filter(o => o.kind === 'material'), [options]);
@@ -5851,12 +5959,44 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
     if (!q) return rawList;
     return rawList.filter(o => o.name.toLowerCase().includes(q));
   }, [rawList, search]);
+  // Quick-create is offered when she's typed a name the catalog doesn't have
+  // (case-insensitive). Bouquets are skipped — those live behind the full
+  // bouquet builder.
+  const trimmedSearch = search.trim();
+  const canQuickCreate = tab !== 'bouquets' && trimmedSearch.length > 0
+    && !(rawList || []).some(o => o.name.toLowerCase() === trimmedSearch.toLowerCase())
+    && ((tab === 'flowers' && typeof onCreateFlower === 'function')
+      || (tab === 'supplies' && typeof onCreateMaterial === 'function'));
+  const handleQuickCreate = () => {
+    if (!canQuickCreate) return;
+    const kind = tab === 'flowers' ? 'flower' : 'material';
+    const created = kind === 'flower'
+      ? onCreateFlower(trimmedSearch)
+      : onCreateMaterial(trimmedSearch);
+    if (!created) return;
+    // Stage with qty=1 so the row appears pre-added the moment the catalog
+    // refreshes — she can tweak price in the same spot before tapping Done.
+    const opt = { kind, name: created.name, hint: kind === 'flower' ? '/bunch' : 'each', price: null };
+    setStagedFor(opt, { qty: 1 });
+  };
   const visibleBouquets = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sortedBouquets;
     return sortedBouquets.filter(b => (b.name || '').toLowerCase().includes(q));
   }, [sortedBouquets, search]);
-  const added = useMemo(() => new Set(addedThisSession || []), [addedThisSession]);
+  const existingKeys = useMemo(() => {
+    // Keys of options whose name is already on the trip — drives the "already
+    // on list" visual. Built from options+existingByName rather than a raw
+    // name set so catalog kind is honored (flower vs material same name).
+    const set = new Set();
+    if (!existingByName) return set;
+    for (const opt of (options || [])) {
+      if (existingByName.has((opt.name || '').toLowerCase())) {
+        set.add(`${opt.kind}:${opt.name}`);
+      }
+    }
+    return set;
+  }, [options, existingByName]);
 
   const keyOf = (opt) => `${opt.kind}:${opt.name}`;
   const getStaged = (opt) => staged[keyOf(opt)];
@@ -5864,7 +6004,10 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
     const k = keyOf(opt);
     const cur = prev[k] || { qty: 0, price: typeof opt.price === 'number' ? opt.price : null };
     const next = { ...cur, ...patch };
-    if ((next.qty || 0) <= 0) {
+    // Keep entries for existing trip items even at qty=0 — qty=0 signals
+    // "remove this row on commit". Non-existing rows at qty=0 are pure no-ops
+    // and can be dropped to keep staged tidy.
+    if ((next.qty || 0) <= 0 && !cur.existingItemId) {
       const { [k]: _, ...rest } = prev;
       return rest;
     }
@@ -5878,23 +6021,40 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
     const cur = getStaged(opt);
     setStagedFor(opt, { qty: Math.max(0, (cur?.qty || 0) - 1) });
   };
+  // Footer counts reflect the full post-commit state (what the trip will hold
+  // after Save), not net additions. Simpler mental model: match the numbers
+  // she's looking at in the rows.
   const stagedCount = Object.values(staged).reduce((s, v) => s + (v.qty || 0), 0);
   const stagedSum = Object.values(staged).reduce((s, v) => s + (v.qty || 0) * (Number(v.price) || 0), 0);
+  const hasChanges = Object.values(staged).some(v => {
+    const qty = v.qty || 0;
+    const initQty = v.initialQty || 0;
+    if (qty !== initQty) return true;
+    const p = Number(v.price);
+    const ip = Number(v.initialPrice);
+    const pn = isFinite(p) ? p : null;
+    const ipn = isFinite(ip) ? ip : null;
+    return pn !== ipn;
+  });
 
   const commitStaged = () => {
     for (const [key, val] of Object.entries(staged)) {
-      if (!val.qty || val.qty <= 0) continue;
       const [kind, ...rest] = key.split(':');
       const name = rest.join(':');
+      const qty = val.qty || 0;
+      const initQty = val.initialQty || 0;
+      const unchanged = qty === initQty && Number(val.price) === Number(val.initialPrice);
+      if (unchanged) continue;
       const opt = { kind, name, price: Number(val.price) || null };
-      // Line total = qty × per-unit price. Label carries qty prefix so the
-      // trip row reads naturally (e.g. "3 Roses").
-      const lineTotal = val.qty * (Number(val.price) || 0);
+      const lineTotal = qty * (Number(val.price) || 0);
+      // Label carries qty prefix so the trip row reads naturally (e.g. "3 Roses").
+      const label = qty > 1 ? `${qty} ${name}` : name;
       onCommit({
         opt,
-        qty: val.qty,
-        label: val.qty > 1 ? `${val.qty} ${name}` : name,
+        qty,
+        label,
         price: lineTotal > 0 ? lineTotal : null,
+        existingItemId: val.existingItemId,
       });
     }
     setStaged({});
@@ -6001,33 +6161,43 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
               );
             })
           ) : (
-            visible.length === 0 ? (
+            <>
+            {visible.length === 0 && !canQuickCreate ? (
               <div style={{ padding: '24px', fontSize: '13px', color: C.inkFaint, fontStyle: 'italic', textAlign: 'center' }}>
                 {search.trim()
                   ? `No ${tab === 'flowers' ? 'flower' : 'supply'} matches "${search}".`
                   : `No ${tab === 'flowers' ? 'flowers' : 'supplies'} yet. Add some on the ${tab === 'flowers' ? 'Flowers' : 'Supplies'} tab first.`}
               </div>
             ) : visible.map(opt => {
-              const isAdded = added.has((opt.name || '').toLowerCase());
+              const isAdded = existingKeys.has(`${opt.kind}:${opt.name}`);
               const st = getStaged(opt);
               const qty = st?.qty || 0;
               const price = st ? st.price : (typeof opt.price === 'number' ? opt.price : null);
               const isStaged = qty > 0;
+              // Existing items with qty=0 are pending removal — fade the row
+              // so she can see what's about to disappear before tapping Save.
+              const isPendingRemoval = !!st?.existingItemId && qty === 0;
               return (
                 <div key={`${opt.kind}:${opt.name}`} style={{
                   padding: '8px 10px', marginBottom: '4px',
-                  background: isStaged ? `${C.sage}22` : (isAdded ? `${C.gold}11` : 'transparent'),
-                  border: `1px solid ${isStaged ? C.sageDeep : (isAdded ? C.gold + '55' : C.borderSoft)}`,
+                  background: isPendingRemoval ? `${C.gold}0e`
+                    : isStaged ? `${C.sage}22`
+                    : (isAdded ? `${C.gold}11` : 'transparent'),
+                  border: `1px solid ${isPendingRemoval ? C.gold + '55'
+                    : isStaged ? C.sageDeep
+                    : (isAdded ? C.gold + '55' : C.borderSoft)}`,
                   borderRadius: '8px',
                   display: 'flex', alignItems: 'center', gap: '8px',
+                  opacity: isPendingRemoval ? 0.6 : 1,
                 }}>
                   {opt.kind === 'flower'
                     ? <Flower2 size={13} strokeWidth={2} color={C.sageDeep} style={{ flexShrink: 0 }} />
                     : <Tag size={13} strokeWidth={2} color={C.inkSoft} style={{ flexShrink: 0 }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '13px', fontWeight: 500, color: C.ink, lineHeight: 1.2 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 500, color: C.ink, lineHeight: 1.2, textDecoration: isPendingRemoval ? 'line-through' : 'none' }}>
                       {opt.name}
-                      {isAdded && <span style={{ fontSize: '10px', color: C.gold, marginLeft: '6px' }}>· already on list</span>}
+                      {isPendingRemoval && <span style={{ fontSize: '10px', color: C.gold, marginLeft: '6px' }}>· will remove</span>}
+                      {!isPendingRemoval && isAdded && <span style={{ fontSize: '10px', color: C.gold, marginLeft: '6px' }}>· on list</span>}
                     </div>
                     {/* Editable price input — defaults to catalog price. */}
                     <div style={{
@@ -6094,7 +6264,22 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
                   </div>
                 </div>
               );
-            })
+            })}
+            {canQuickCreate && (
+              <button type="button" onClick={handleQuickCreate}
+                style={{
+                  width: '100%', marginTop: '4px', padding: '11px 12px',
+                  background: 'transparent',
+                  border: `1px dashed ${C.sageDeep}88`, borderRadius: '8px',
+                  color: C.sageDeep, fontFamily: 'inherit', fontSize: '13px', fontWeight: 500,
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                }}>
+                <Plus size={14} strokeWidth={2.4} />
+                Add <strong style={{ fontWeight: 600 }}>&ldquo;{trimmedSearch}&rdquo;</strong> as new {tab === 'flowers' ? 'flower' : 'supply'}
+              </button>
+            )}
+            </>
           )}
         </div>
 
@@ -6115,7 +6300,7 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
             </div>
           )}
           <button
-            onClick={tab !== 'bouquets' && stagedCount > 0 ? commitStaged : onClose}
+            onClick={tab !== 'bouquets' && hasChanges ? commitStaged : onClose}
             className="primary-btn"
             style={{
               flex: 1, padding: '12px',
@@ -6125,9 +6310,7 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
             }}>
             <Check size={14} strokeWidth={2.4} />
-            {tab !== 'bouquets' && stagedCount > 0
-              ? `Add ${stagedCount} to trip`
-              : 'Done'}
+            {tab !== 'bouquets' && hasChanges ? 'Save changes' : 'Done'}
           </button>
         </div>
       </div>
@@ -8743,6 +8926,142 @@ function OrderLog({ orders, sort, setSort, filter, setFilter, onViewReceipt, fmt
 
 // --------------------- SHOPPING ---------------------
 
+// Tap-to-edit modal for a single shopping-trip row. Opens when the user taps
+// an item's name — lets her adjust qty and rename without fighting with the
+// inline label input. Saves back as a single qty-prefixed label so the data
+// shape stays compatible with the rest of the trip machinery.
+function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
+  // Parse the current label into qty + noun on open. Label-stored qty is how
+  // every other part of the app reads it, so we keep that contract.
+  const parse = (label) => {
+    const m = (label || '').trim().match(/^(\d+)\s+(.+)$/);
+    if (!m) return { qty: 1, name: (label || '').trim() };
+    return { qty: parseInt(m[1]) || 1, name: m[2].trim() };
+  };
+  const initial = parse(item.label || '');
+  const [name, setName] = useState(initial.name);
+  const [qty, setQty] = useState(initial.qty);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const handleSave = () => {
+    const cleanName = name.trim();
+    if (!cleanName) return;
+    const cleanQty = Math.max(1, parseInt(qty) || 1);
+    const nextLabel = cleanQty > 1 ? `${cleanQty} ${cleanName}` : cleanName;
+    onSave({ label: nextLabel });
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(42,53,40,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '20px', zIndex: 75, backdropFilter: 'blur(4px)',
+    }}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
+        background: C.card, borderRadius: '16px', padding: '20px',
+        width: '100%', maxWidth: '400px',
+        boxShadow: '0 20px 60px rgba(42,53,40,0.3)',
+        display: 'flex', flexDirection: 'column', gap: '14px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+          <h2 className="serif" style={{ fontSize: '20px', margin: 0, fontWeight: 500, letterSpacing: '-0.01em' }}>
+            Edit item
+          </h2>
+          <button onClick={onClose} aria-label="Close" style={{
+            background: 'transparent', border: 'none', padding: '6px', borderRadius: '8px',
+            cursor: 'pointer', color: C.inkSoft,
+          }}><X size={16} /></button>
+        </div>
+
+        <div>
+          <label style={{
+            display: 'block', fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase', color: C.inkFaint, marginBottom: '6px',
+          }}>Name</label>
+          <input className="text-input" type="text" value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
+            style={{ ...inputStyle(), width: '100%' }} />
+        </div>
+
+        <div>
+          <label style={{
+            display: 'block', fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase', color: C.inkFaint, marginBottom: '6px',
+          }}>Quantity</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button type="button" onClick={() => setQty(q => Math.max(1, (parseInt(q) || 1) - 1))}
+              aria-label="Decrease" style={{
+                width: '40px', height: '40px', borderRadius: '50%',
+                background: C.bgDeep, border: `1px solid ${C.borderSoft}`,
+                color: C.ink, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}><Minus size={16} strokeWidth={2.4} /></button>
+            <input type="text" inputMode="numeric" value={qty}
+              onChange={(e) => {
+                const raw = e.target.value.replace(/\D/g, '');
+                setQty(raw === '' ? '' : parseInt(raw));
+              }}
+              onBlur={() => { if (!qty) setQty(1); }}
+              style={{
+                ...inputStyle(),
+                flex: 1, textAlign: 'center', fontSize: '18px', fontWeight: 600,
+              }} />
+            <button type="button" onClick={() => setQty(q => (parseInt(q) || 0) + 1)}
+              aria-label="Increase" style={{
+                width: '40px', height: '40px', borderRadius: '50%',
+                background: C.sageDeep, border: 'none',
+                color: C.card, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}><Plus size={16} strokeWidth={2.6} /></button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+          {confirmingDelete ? (
+            <>
+              <button onClick={() => setConfirmingDelete(false)} style={{
+                flex: 1, padding: '11px', background: 'transparent', border: `1px solid ${C.border}`,
+                borderRadius: '10px', color: C.inkSoft, fontFamily: 'inherit', fontSize: '13px',
+                fontWeight: 500, cursor: 'pointer',
+              }}>Cancel</button>
+              <button onClick={onDelete} style={{
+                flex: 1, padding: '11px', background: C.gold, border: 'none',
+                borderRadius: '10px', color: C.card, fontFamily: 'inherit', fontSize: '13px',
+                fontWeight: 600, cursor: 'pointer',
+              }}>Delete item</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setConfirmingDelete(true)} aria-label="Delete" style={{
+                padding: '11px 14px', background: 'transparent',
+                border: `1px solid ${C.borderSoft}`, borderRadius: '10px',
+                color: C.inkFaint, fontFamily: 'inherit', fontSize: '13px',
+                fontWeight: 500, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '6px',
+              }}><Trash2 size={14} strokeWidth={2} /> Delete</button>
+              <button onClick={onClose} style={{
+                flex: 1, padding: '11px', background: 'transparent', border: `1px solid ${C.border}`,
+                borderRadius: '10px', color: C.inkSoft, fontFamily: 'inherit', fontSize: '13px',
+                fontWeight: 500, cursor: 'pointer',
+              }}>Cancel</button>
+              <button onClick={handleSave} className="primary-btn" style={{
+                flex: 1, padding: '11px', background: C.sageDeep, border: 'none',
+                borderRadius: '10px', color: C.card, fontFamily: 'inherit', fontSize: '13px',
+                fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+              }}>
+                <Check size={14} strokeWidth={2.4} /> Save
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Render an ISO date string (YYYY-MM-DD) as "Today", "Tomorrow", or a friendly weekday-month-day.
 // Falls back gracefully on missing/invalid input. Year is shown only when it isn't this year.
 function formatTripDate(iso) {
@@ -8864,6 +9183,7 @@ function TripCard({
   knownStoreTags, onAddStoreTag, onDeleteStoreTag,
   onUpdate, onAddItem, onUpdateItem, onRemoveItem,
   onComplete, onStartScheduled, onDelete, onCancelActive,
+  onCreateFlower, onCreateMaterial,
 }) {
   const [newItemLabel, setNewItemLabel] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -8875,6 +9195,73 @@ function TripCard({
   const [filterCustomer, setFilterCustomer] = useState('all');
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
+  // Which row is open in the edit modal. Kept as id so the lookup stays
+  // live — if the underlying item changes (e.g. qty bumped from outside),
+  // the modal reflects it on next render.
+  const [editingItemId, setEditingItemId] = useState(null);
+  const editingItem = editingItemId
+    ? (trip.items || []).find(it => it.id === editingItemId)
+    : null;
+  // Id of the row currently being dragged. Written on dragstart, read by
+  // other rows to style their drop indicator, cleared on dragend.
+  const [draggingId, setDraggingId] = useState(null);
+  // Drop-target id — the row the cursor is currently over while dragging.
+  // Drives a subtle highlight so she can see where the drop will land.
+  const [dropTargetId, setDropTargetId] = useState(null);
+
+  // Rewrites trip.items into a new order. Shared by the sort buttons and
+  // the drag-reorder handler — both ultimately mutate the stored order.
+  const reorderItems = (nextItems) => {
+    onUpdate(trip.id, { items: nextItems });
+  };
+
+  // Sort by parsed noun (ignoring qty prefix) so "4 Roses" sits next to
+  // "Roses" alphabetically. Checked items drop below unchecked regardless of
+  // name — she cares most about what's still to buy.
+  const sortAZ = () => {
+    const parsed = (trip.items || []).map(it => ({
+      it,
+      noun: (parseLabel(it.label || '').noun || it.label || '').trim().toLowerCase(),
+    }));
+    parsed.sort((a, b) => {
+      if (!!a.it.checked !== !!b.it.checked) return a.it.checked ? 1 : -1;
+      return a.noun.localeCompare(b.noun);
+    });
+    reorderItems(parsed.map(p => p.it));
+  };
+
+  // "Priority" = what matters most to grab first: unchecked items tied to
+  // upcoming customer orders first (restock-linked), then other unchecked,
+  // then checked at the bottom. Within each bucket we preserve the user's
+  // current order so earlier drag tweaks aren't clobbered.
+  const sortPriority = () => {
+    const scored = (trip.items || []).map((it, idx) => {
+      let tier = 2;
+      if (!it.checked) tier = Array.isArray(it.forOrderIds) && it.forOrderIds.length > 0 ? 0 : 1;
+      return { it, tier, idx };
+    });
+    scored.sort((a, b) => a.tier - b.tier || a.idx - b.idx);
+    reorderItems(scored.map(s => s.it));
+  };
+
+  // Drop handler — moves the dragged row to just before the drop target,
+  // or to the end if targetId is null. No-op if the dragged row would
+  // land in the same spot.
+  const handleDrop = (targetId) => {
+    if (!draggingId || draggingId === targetId) return;
+    const items = [...(trip.items || [])];
+    const fromIdx = items.findIndex(it => it.id === draggingId);
+    if (fromIdx < 0) return;
+    const [moved] = items.splice(fromIdx, 1);
+    const toIdx = targetId == null
+      ? items.length
+      : items.findIndex(it => it.id === targetId);
+    if (toIdx < 0) items.push(moved);
+    else items.splice(toIdx, 0, moved);
+    reorderItems(items);
+    setDraggingId(null);
+    setDropTargetId(null);
+  };
   const isActive = variant === 'active';
 
   // Catalog options for the Add-item picker — flowers + supplies, sorted by
@@ -9143,10 +9530,33 @@ function TripCard({
            tap "All" or a customer to scope the visible list. The underlying
            data is unchanged; this is purely a view filter. */}
       <div style={{
-        fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
-        textTransform: 'uppercase', color: C.inkFaint, marginBottom: '6px',
-        flexShrink: 0,
-      }}>To buy</div>
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: '6px', flexShrink: 0, gap: '8px',
+      }}>
+        <div style={{
+          fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: C.inkFaint,
+        }}>To buy</div>
+        {(trip.items || []).length > 1 && (
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button type="button" onClick={sortAZ}
+              title="Sort A–Z" aria-label="Sort A–Z"
+              style={{
+                padding: '4px 8px', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em',
+                background: 'transparent', border: `1px solid ${C.borderSoft}`,
+                borderRadius: '6px', color: C.inkSoft, fontFamily: 'inherit', cursor: 'pointer',
+              }}>A–Z</button>
+            <button type="button" onClick={sortPriority}
+              title="Sort by priority — orders first, checked last"
+              aria-label="Sort by priority"
+              style={{
+                padding: '4px 8px', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em',
+                background: 'transparent', border: `1px solid ${C.borderSoft}`,
+                borderRadius: '6px', color: C.inkSoft, fontFamily: 'inherit', cursor: 'pointer',
+              }}>Priority</button>
+          </div>
+        )}
+      </div>
       <div className="restock-grid" style={{
         display: 'grid',
         // Slim customer rail (~25%) so the actual checklist gets the room.
@@ -9318,13 +9728,37 @@ function TripCard({
             : (it.priceRaw !== undefined
               ? it.priceRaw
               : (typeof catalogPrice === 'number' ? catalogPrice.toFixed(2) : ''));
+          const isDragging = draggingId === it.id;
+          const isDropTarget = dropTargetId === it.id && draggingId && draggingId !== it.id;
           return (
-            <div key={it.id} style={{
-              display: 'flex', alignItems: 'flex-start', gap: '10px',
-              padding: '6px 8px', borderRadius: '8px',
-              background: it.checked ? `${C.sage}14` : 'transparent',
-              transition: 'background 140ms ease',
-            }}>
+            <div key={it.id}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                // Required for Firefox to initiate drag.
+                try { e.dataTransfer.setData('text/plain', it.id); } catch {}
+                setDraggingId(it.id);
+              }}
+              onDragOver={(e) => {
+                if (!draggingId || draggingId === it.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dropTargetId !== it.id) setDropTargetId(it.id);
+              }}
+              onDragLeave={(e) => {
+                if (dropTargetId === it.id) setDropTargetId(null);
+              }}
+              onDrop={(e) => { e.preventDefault(); handleDrop(it.id); }}
+              onDragEnd={() => { setDraggingId(null); setDropTargetId(null); }}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: '10px',
+                padding: '6px 8px', borderRadius: '8px',
+                background: isDropTarget ? `${C.sageDeep}1a`
+                  : it.checked ? `${C.sage}14` : 'transparent',
+                borderTop: isDropTarget ? `2px solid ${C.sageDeep}` : '2px solid transparent',
+                opacity: isDragging ? 0.4 : 1,
+                transition: 'background 140ms ease, opacity 140ms ease',
+              }}>
               <button onClick={() => onUpdateItem(trip.id, it.id, { checked: !it.checked })}
                 aria-label={it.checked ? 'Mark not bought' : 'Mark bought'}
                 style={{
@@ -9338,27 +9772,30 @@ function TripCard({
                 }}>
                 {it.checked && <Check size={14} strokeWidth={3} color={C.card} />}
               </button>
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                <input type="text" value={displayValue}
-                  onChange={(e) => {
-                    const next = { label: e.target.value };
-                    // Collapse old structured fields once the user touches the row,
-                    // so future edits live entirely in the label string.
-                    if (hasLegacyExtras) { next.qty = 1; next.unit = ''; }
-                    onUpdateItem(trip.id, it.id, next);
-                  }}
-                  placeholder="Item"
-                  style={{
-                    width: '100%', padding: '6px 4px', fontSize: '14px', fontFamily: 'inherit',
-                    background: 'transparent', border: 'none', outline: 'none',
-                    color: it.checked ? C.inkFaint : C.ink,
-                    textDecoration: it.checked ? 'line-through' : 'none',
-                  }} />
+              <div
+                onClick={() => setEditingItemId(it.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingItemId(it.id); } }}
+                style={{
+                  flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
+                  padding: '6px 4px', cursor: 'pointer', borderRadius: '4px',
+                  // Subtle affordance so the row reads as tappable.
+                  transition: 'background 140ms ease',
+                }}>
+                <div style={{
+                  fontSize: '14px', fontFamily: 'inherit',
+                  color: it.checked ? C.inkFaint : (displayValue ? C.ink : C.inkFaint),
+                  textDecoration: it.checked ? 'line-through' : 'none',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {displayValue || 'Item'}
+                </div>
                 {/* Restock provenance — which orders this line was generated for. */}
                 {customers.length > 0 && (
                   <div style={{
-                    fontSize: '11px', color: C.inkFaint, padding: '0 4px 2px',
-                    lineHeight: 1.4,
+                    fontSize: '11px', color: C.inkFaint,
+                    lineHeight: 1.4, marginTop: '2px',
                     textDecoration: it.checked ? 'line-through' : 'none',
                   }}>
                     for {customers.length <= 3
@@ -9538,14 +9975,70 @@ function TripCard({
           materials={materials || []}
           search={overlaySearch}
           setSearch={setOverlaySearch}
-          addedThisSession={(trip.items || []).map(it => {
-            // Strip qty prefix via parseLabel so overlay matches by noun:
-            // a trip row labelled "2 Roses" should still flag the catalog
-            // "Roses" option as "already on list".
-            const noun = (parseLabel(it.label || '').noun || it.label || '').trim().toLowerCase();
-            return noun;
-          })}
-          onCommit={({ qty, label, price }) => {
+          onCreateFlower={onCreateFlower}
+          onCreateMaterial={onCreateMaterial}
+          existingByName={(() => {
+            // Map of lowercase-noun → { itemIds[], qty, perUnitPrice } aggregated
+            // across every matching unchecked row on the trip. The overlay seeds
+            // its stepper from the summed qty so "1 wwe" + "2 wwe" + "2 wwe"
+            // reads as qty 5, and commits consolidate those rows back into one.
+            // Checked rows are excluded — those are "already bought" and should
+            // not fold into pending edits.
+            const map = new Map();
+            for (const it of (trip.items || [])) {
+              if (it.checked) continue;
+              const parsed = parseLabel(it.label || '');
+              const noun = (parsed.noun || it.label || '').trim().toLowerCase();
+              if (!noun) continue;
+              const qty = parsed.qty || 1;
+              const lineTotal = typeof it.price === 'number' ? it.price : null;
+              const cur = map.get(noun);
+              if (cur) {
+                cur.itemIds.push(it.id);
+                cur.qty += qty;
+                if (lineTotal != null) cur.totalPrice = (cur.totalPrice || 0) + lineTotal;
+              } else {
+                map.set(noun, {
+                  itemIds: [it.id],
+                  qty,
+                  totalPrice: lineTotal,
+                });
+              }
+            }
+            // Derive per-unit price from aggregate so the overlay's $ field
+            // reads the weighted unit cost.
+            for (const v of map.values()) {
+              v.itemId = v.itemIds[0];
+              v.price = (v.totalPrice != null && v.qty > 0) ? v.totalPrice / v.qty : null;
+            }
+            return map;
+          })()}
+          onCommit={({ qty, label, price, existingItemId }) => {
+            // Three paths: update an existing row, remove it (qty=0), or add
+            // a brand-new row. For items aggregated across duplicates, update
+            // the first id and sweep the rest so save consolidates the list.
+            if (existingItemId) {
+              const name = (parseLabel(label || '').noun || label || '').trim().toLowerCase();
+              const dupIds = (trip.items || [])
+                .filter(it => !it.checked && it.id !== existingItemId)
+                .filter(it => {
+                  const n = (parseLabel(it.label || '').noun || it.label || '').trim().toLowerCase();
+                  return n && n === name;
+                })
+                .map(it => it.id);
+              if (!qty || qty <= 0) {
+                onRemoveItem(trip.id, existingItemId);
+                for (const id of dupIds) onRemoveItem(trip.id, id);
+              } else {
+                onUpdateItem(trip.id, existingItemId, {
+                  label,
+                  price: (typeof price === 'number' && price > 0) ? price : null,
+                });
+                for (const id of dupIds) onRemoveItem(trip.id, id);
+              }
+              return;
+            }
+            if (!qty || qty <= 0) return;
             const taggedCustomers = (filterCustomer !== 'all' && filterCustomer !== '__other__')
               ? [filterCustomer] : undefined;
             onAddItem(trip.id, {
@@ -9584,6 +10077,21 @@ function TripCard({
             }
           }}
           onClose={() => { setOverlayOpen(false); setOverlaySearch(''); }}
+        />
+      )}
+
+      {editingItem && (
+        <ShoppingItemEditModal
+          item={editingItem}
+          onSave={(patch) => {
+            onUpdateItem(trip.id, editingItem.id, patch);
+            setEditingItemId(null);
+          }}
+          onDelete={() => {
+            onRemoveItem(trip.id, editingItem.id);
+            setEditingItemId(null);
+          }}
+          onClose={() => setEditingItemId(null)}
         />
       )}
 
@@ -9821,7 +10329,7 @@ function CompleteTripWarning({ uncheckedCount, totalCount, onCancel, onConfirm }
   );
 }
 
-function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, orders, settings, knownStoreTags, onAddStoreTag, onDeleteStoreTag, onStart, onSchedule, onStartScheduled, onCancelActive, onRestock, onUpdate, onAddItem, onUpdateItem, onRemoveItem, onComplete, onDelete }) {
+function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, orders, settings, knownStoreTags, onAddStoreTag, onDeleteStoreTag, onStart, onSchedule, onStartScheduled, onCancelActive, onRestock, onUpdate, onAddItem, onUpdateItem, onRemoveItem, onComplete, onDelete, onCreateFlower, onCreateMaterial }) {
   // Live list of customer names with upcoming orders within the restock
   // horizon. Threaded into every TripCard so the rail reflects current
   // pickups even on trips created before extraCustomers was tracked.
@@ -9843,14 +10351,18 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* Auto-restock banner — visible whenever onRestock handler exists.
-          Sits above everything so it's discoverable on the empty state too. */}
+      {/* Auto-restock banner — pinned below the app chrome so she can tap it
+          from anywhere in the Shopping tab even when an active trip pushes
+          the list down. --chrome-h is set by the App once the sticky chrome
+          mounts; falls back to a reasonable default until measurement lands. */}
       {onRestock && (
         <button onClick={onRestock} style={{
+          position: 'sticky', top: 'var(--chrome-h, 156px)', zIndex: 20,
           padding: '14px 16px', background: `${C.sage}1f`,
           border: `1px solid ${C.sage}88`, borderRadius: '12px',
           color: C.ink, fontFamily: 'inherit', cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'left',
+          boxShadow: '0 6px 16px rgba(42,53,40,0.08)',
         }}>
           <div style={{
             width: '34px', height: '34px', background: C.sageDeep, borderRadius: '10px',
@@ -9905,6 +10417,7 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
               onUpdate={onUpdate} onAddItem={onAddItem} onUpdateItem={onUpdateItem}
               onRemoveItem={onRemoveItem} onComplete={onComplete} onDelete={onDelete}
               onCancelActive={onCancelActive}
+              onCreateFlower={onCreateFlower} onCreateMaterial={onCreateMaterial}
             />
           )}
 
@@ -9938,6 +10451,7 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
                     onAddStoreTag={onAddStoreTag} onDeleteStoreTag={onDeleteStoreTag}
                     onUpdate={onUpdate} onAddItem={onAddItem} onUpdateItem={onUpdateItem}
                     onRemoveItem={onRemoveItem} onStartScheduled={onStartScheduled} onDelete={onDelete}
+                    onCreateFlower={onCreateFlower} onCreateMaterial={onCreateMaterial}
                   />
                 ))}
               </div>
