@@ -50,25 +50,64 @@ const MATERIAL_TYPES = DEFAULT_MATERIAL_TYPES;
 // She can pick one to add as a trip row; no catalog entry is created unless
 // she does so explicitly from the Add-to-trip overlay.
 const COMMON_FLOWER_NAMES = [
-  'Alstroemeria', 'Amaryllis', 'Anemone', 'Anthurium', 'Aster',
-  "Baby's breath", 'Bells of Ireland', 'Bird of paradise', 'Bouvardia',
-  'Calla lily', 'Camellia', 'Carnation', 'Chrysanthemum', 'Clematis',
-  'Cornflower', 'Cosmos', 'Daffodil', 'Dahlia', 'Daisy', 'Delphinium',
-  'Dianthus', 'Dusty miller', 'Eucalyptus', 'Ferns', 'Forget-me-not',
-  'Foxglove', 'Freesia', 'Gardenia', 'Gerbera', 'Gladiolus', 'Heather',
-  'Hibiscus', 'Hyacinth', 'Hydrangea', 'Iris', 'Ivy', 'Jasmine',
-  'Larkspur', 'Lavender', 'Liatris', 'Lilac', 'Lily', 'Lily of the valley',
-  'Lisianthus', 'Magnolia', 'Marigold', 'Mum', 'Narcissus', 'Nigella',
-  'Orchid', 'Pansy', 'Peony', 'Phlox', 'Pincushion', 'Poppy', 'Protea',
-  "Queen Anne's lace", 'Ranunculus', 'Rose', 'Ruscus', 'Salal',
-  'Scabiosa', 'Snapdragon', 'Solidago', 'Statice', 'Stephanotis', 'Stock',
-  'Sunflower', 'Sweet pea', 'Sweet William', 'Thistle', 'Tulip',
-  'Veronica', 'Violet', 'Waxflower', 'Yarrow', 'Zinnia',
+  'Acacia', 'Achillea', 'African daisy', 'Agapanthus', 'Allium',
+  'Alstroemeria', 'Alyssum', 'Amaranthus', 'Amaryllis', 'Anemone',
+  'Angelica', 'Anthurium', 'Aspidistra leaf', 'Aster', 'Astilbe', 'Azalea',
+  "Baby's breath", 'Bachelor\'s button', 'Banksia', 'Bear grass',
+  'Begonia', 'Bells of Ireland', 'Bergenia', 'Billy buttons',
+  'Bird of paradise', 'Black-eyed Susan', 'Bleeding heart', 'Blue thistle',
+  'Bouvardia', 'Boxwood', 'Bupleurum', 'Buttercup',
+  'Calendula', 'Calla lily', 'Camellia', 'Camomile', 'Campanula', 'Canna',
+  'Carnation', 'Cedar', 'Celosia', 'Cherry blossom', 'Chrysanthemum',
+  'Clematis', 'Cockscomb', 'Columbine', 'Coneflower', 'Coreopsis',
+  'Cornflower', 'Cosmos', 'Crocus', 'Curly willow', 'Cymbidium orchid', 'Cypress',
+  'Daffodil', 'Dahlia', 'Daisy', 'Delphinium', 'Dendrobium orchid',
+  'Dianthus', 'Dogwood', 'Dusty miller',
+  'Echinacea', 'Eremurus', 'Eryngium', 'Eucalyptus', 'Euphorbia',
+  'Ferns', 'Feverfew', 'Flowering quince', 'Forget-me-not', 'Forsythia', 'Foxglove',
+  'Frangipani', 'Freesia', 'Fritillaria', 'Fuchsia',
+  'Gaillardia', 'Galax leaf', 'Gardenia', 'Gazania', 'Gentian', 'Geranium',
+  'Gerbera', 'Ginger', 'Gladiolus', 'Globe amaranth', 'Godetia',
+  'Grape hyacinth', 'Gypsophila',
+  'Heather', 'Helenium', 'Heliconia', 'Helleborus', 'Hibiscus', 'Hollyhock',
+  'Honeysuckle', 'Hosta', 'Huckleberry', 'Hyacinth', 'Hydrangea', 'Hypericum',
+  'Iberis', 'Iris', 'Israeli ruscus', 'Italian ruscus', 'Ivy', 'Ixia',
+  'Jasmine', 'Jonquil', 'Juniper',
+  'Kale', 'King protea', 'Knautia',
+  "Lamb's ear", 'Lantana', 'Larkspur', 'Lavender', 'Leather leaf',
+  'Lemon leaf', 'Leucadendron', 'Liatris', 'Lilac', 'Lily',
+  'Lily of the valley', 'Lisianthus', 'Lobelia', 'Lotus pod', 'Love-in-a-mist',
+  'Lupine',
+  'Magnolia', 'Magnolia leaf', 'Maidenhair fern', 'Marigold', 'Millet',
+  'Mimosa', 'Mini carnation', 'Mini rose', 'Monkshood', 'Monstera leaf',
+  'Moss', 'Mum', 'Myrtle',
+  'Narcissus', 'Nasturtium', 'Nerine', 'Nigella',
+  'Olive branch', 'Oregonia', 'Oriental lily', 'Orchid',
+  'Pampas grass', 'Pansy', 'Paperwhite', 'Passionflower', 'Peony', 'Phlox',
+  'Pincushion', 'Pittosporum', 'Plumeria', 'Plumosa fern', 'Podocarpus',
+  'Poppy', 'Primrose', 'Protea',
+  "Queen Anne's lace",
+  'Ranunculus', 'Rose', 'Rosemary', 'Ruscus',
+  'Sage', 'Salal', 'Scabiosa', 'Sea holly', 'Sedum', 'Seeded eucalyptus',
+  'Silver dollar eucalyptus', 'Skimmia', 'Snapdragon', 'Snowberry',
+  'Snowdrop', 'Solidago', 'Spider mum', 'Spirea', 'Spray rose',
+  'Stargazer lily', 'Statice', 'Stephanotis', 'Stock', 'Strawflower',
+  'Succulent', 'Sunflower', 'Sweet Annie', 'Sweet pea', 'Sweet William',
+  'Sword fern',
+  'Tansy', 'Thistle', 'Trachelium', 'Tuberose', 'Tulip', 'Tweedia',
+  'Veronica', 'Viburnum', 'Viola', 'Violet',
+  'Wallflower', 'Waxflower', 'Willow', 'Wisteria',
+  'Yarrow', 'Yucca',
+  'Zinnia',
 ];
 const COMMON_SUPPLY_NAMES = [
-  'Bouquet holder', 'Cellophane', 'Chicken wire', 'Corsage magnet',
-  'Floral foam', 'Floral tape', 'Flower food', 'Greening pins', 'Oasis',
-  'Pins', 'Raffia', 'Ribbon', 'Tape', 'Twine', 'Vase', 'Water tubes',
+  'Bouquet holder', 'Boutonnière pins', 'Burlap', 'Candles', 'Cellophane',
+  'Chicken wire', 'Clear tape', 'Clips', 'Cord', 'Corsage magnet',
+  'Dowels', 'Floral foam', 'Floral picks', 'Floral tape', 'Floral wire',
+  'Flower food', 'Glue dots', 'Glue gun', 'Greening pins', 'Hot glue sticks',
+  'Jute', 'Moss mat', 'Oasis', 'Pebbles', 'Pins', 'Raffia', 'Ribbon',
+  'River rocks', 'Rubber bands', 'Sand', 'Sheet moss', 'Sphagnum moss',
+  'Sticks', 'Styrofoam', 'Tape', 'Tulle', 'Twine', 'Vase', 'Water tubes',
   'Wire', 'Wrapping paper',
 ];
 
@@ -6015,6 +6054,24 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
 
   const flowerOpts = useMemo(() => options.filter(o => o.kind === 'flower'), [options]);
   const supplyOpts = useMemo(() => options.filter(o => o.kind === 'material'), [options]);
+  // Dictionary suggestions scoped by tab — common florist names she hasn't
+  // added to her catalog yet. Only surfaced while she's searching so the
+  // idle view stays focused on her real catalog.
+  const suggestionOpts = useMemo(() => {
+    const have = new Set(options.map(o => `${o.kind}:${o.name.toLowerCase()}`));
+    const list = [];
+    for (const name of COMMON_FLOWER_NAMES) {
+      if (!have.has(`flower:${name.toLowerCase()}`)) {
+        list.push({ kind: 'flower', name, hint: '/bunch', price: null, isSuggestion: true });
+      }
+    }
+    for (const name of COMMON_SUPPLY_NAMES) {
+      if (!have.has(`material:${name.toLowerCase()}`)) {
+        list.push({ kind: 'material', name, hint: 'each', price: null, isSuggestion: true });
+      }
+    }
+    return list;
+  }, [options]);
   const sortedBouquets = useMemo(() =>
     [...(bouquets || [])].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
   , [bouquets]);
@@ -6025,8 +6082,24 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
     if (!rawList) return [];
     const q = search.trim().toLowerCase();
     if (!q) return rawList;
-    return rawList.filter(o => o.name.toLowerCase().includes(q));
-  }, [rawList, search]);
+    // Pool = her catalog for this tab + dictionary suggestions for this tab.
+    // Rank: catalog starts-with, catalog contains, suggestion starts-with,
+    // suggestion contains — so her own entries always float to the top.
+    const suggestionsForTab = tab === 'flowers'
+      ? suggestionOpts.filter(o => o.kind === 'flower')
+      : (tab === 'supplies' ? suggestionOpts.filter(o => o.kind === 'material') : []);
+    const pool = [...rawList, ...suggestionsForTab];
+    return pool
+      .filter(o => o.name.toLowerCase().includes(q))
+      .map(o => ({
+        o,
+        cat: o.isSuggestion ? 1 : 0,
+        starts: o.name.toLowerCase().startsWith(q) ? 0 : 1,
+      }))
+      .sort((a, b) => a.cat - b.cat || a.starts - b.starts || a.o.name.localeCompare(b.o.name))
+      .slice(0, 40)
+      .map(x => x.o);
+  }, [rawList, suggestionOpts, search, tab]);
   // Quick-create is offered when she's typed a name the catalog doesn't have
   // (case-insensitive). Bouquets are skipped — those live behind the full
   // bouquet builder.
@@ -6259,13 +6332,22 @@ function ShoppingCatalogOverlay({ options, bouquets, flowers, materials, search,
                   opacity: isPendingRemoval ? 0.6 : 1,
                 }}>
                   {opt.kind === 'flower'
-                    ? <Flower2 size={13} strokeWidth={2} color={C.sageDeep} style={{ flexShrink: 0 }} />
+                    ? <Flower2 size={13} strokeWidth={2} color={opt.isSuggestion ? C.inkFaint : C.sageDeep} style={{ flexShrink: 0 }} />
                     : <Tag size={13} strokeWidth={2} color={C.inkSoft} style={{ flexShrink: 0 }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '13px', fontWeight: 500, color: C.ink, lineHeight: 1.2, textDecoration: isPendingRemoval ? 'line-through' : 'none' }}>
+                    <div style={{
+                      fontSize: '13px', fontWeight: 500,
+                      color: opt.isSuggestion ? C.inkSoft : C.ink,
+                      fontStyle: opt.isSuggestion ? 'italic' : 'normal',
+                      lineHeight: 1.2,
+                      textDecoration: isPendingRemoval ? 'line-through' : 'none',
+                    }}>
                       {opt.name}
                       {isPendingRemoval && <span style={{ fontSize: '10px', color: C.gold, marginLeft: '6px' }}>· will remove</span>}
                       {!isPendingRemoval && isAdded && <span style={{ fontSize: '10px', color: C.gold, marginLeft: '6px' }}>· on list</span>}
+                      {!isPendingRemoval && !isAdded && opt.isSuggestion && (
+                        <span style={{ fontSize: '10px', color: C.inkFaint, marginLeft: '6px', fontStyle: 'normal' }}>· suggestion</span>
+                      )}
                     </div>
                     {/* Editable price input — defaults to catalog price. */}
                     <div style={{
@@ -8998,7 +9080,7 @@ function OrderLog({ orders, sort, setSort, filter, setFilter, onViewReceipt, fmt
 // an item's name — lets her adjust qty and rename without fighting with the
 // inline label input. Saves back as a single qty-prefixed label so the data
 // shape stays compatible with the rest of the trip machinery.
-function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
+function ShoppingItemEditModal({ item, onSave, onDelete, onClose, suggestionNames }) {
   // Parse the current label into qty + noun on open. Label-stored qty is how
   // every other part of the app reads it, so we keep that contract.
   const parse = (label) => {
@@ -9011,6 +9093,24 @@ function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
   const [qty, setQty] = useState(initial.qty);
   const [priority, setPriority] = useState(!!item.priority);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [nameFocus, setNameFocus] = useState(false);
+  // Typeahead matches for the name input — the parent passes a combined list
+  // of her catalog names and dictionary suggestions. We rank starts-with
+  // ahead of contains and cap to 8 so the dropdown never dominates the modal.
+  const nameMatches = useMemo(() => {
+    const q = (name || '').trim().toLowerCase();
+    if (!q || !Array.isArray(suggestionNames)) return [];
+    const lowerInitial = (initial.name || '').toLowerCase();
+    return suggestionNames
+      .filter(n => {
+        const ln = n.toLowerCase();
+        return ln !== q && ln !== lowerInitial && ln.includes(q);
+      })
+      .map(n => ({ n, starts: n.toLowerCase().startsWith(q) ? 0 : 1 }))
+      .sort((a, b) => a.starts - b.starts || a.n.localeCompare(b.n))
+      .slice(0, 8)
+      .map(x => x.n);
+  }, [name, suggestionNames, initial.name]);
 
   const handleSave = () => {
     const cleanName = name.trim();
@@ -9042,7 +9142,7 @@ function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
           }}><X size={16} /></button>
         </div>
 
-        <div>
+        <div style={{ position: 'relative' }}>
           <label style={{
             display: 'block', fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em',
             textTransform: 'uppercase', color: C.inkFaint, marginBottom: '6px',
@@ -9050,8 +9150,33 @@ function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
           <input className="text-input" type="text" value={name}
             onChange={(e) => setName(e.target.value)}
             autoFocus
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
+            onFocus={() => setNameFocus(true)}
+            onBlur={() => setTimeout(() => setNameFocus(false), 120)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+              else if (e.key === 'Escape') setNameFocus(false);
+            }}
             style={{ ...inputStyle(), width: '100%' }} />
+          {nameFocus && nameMatches.length > 0 && (
+            <div className="no-scrollbar" style={{
+              position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 5,
+              background: C.card, border: `1px solid ${C.border}`, borderRadius: '8px',
+              boxShadow: '0 8px 20px rgba(42,53,40,0.14)',
+              maxHeight: '180px', overflowY: 'auto', padding: '4px',
+            }}>
+              {nameMatches.map(n => (
+                <button key={n} type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setName(n); setNameFocus(false); }}
+                  style={{
+                    width: '100%', padding: '8px 10px', background: 'transparent',
+                    border: 'none', borderRadius: '6px',
+                    fontFamily: 'inherit', fontSize: '13px', color: C.ink,
+                    cursor: 'pointer', textAlign: 'left',
+                  }}>{n}</button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div>
@@ -10261,6 +10386,16 @@ function TripCard({
       {editingItem && (
         <ShoppingItemEditModal
           item={editingItem}
+          suggestionNames={(() => {
+            // Combined pool: her catalog names + dictionary names not in catalog.
+            // Given to the modal so the name field can autocomplete the same way
+            // the inline add-item popover does.
+            const have = new Set(catalogOptions.map(o => o.name.toLowerCase()));
+            const out = catalogOptions.map(o => o.name);
+            for (const n of COMMON_FLOWER_NAMES) if (!have.has(n.toLowerCase())) out.push(n);
+            for (const n of COMMON_SUPPLY_NAMES) if (!have.has(n.toLowerCase())) out.push(n);
+            return out;
+          })()}
           onSave={(patch) => {
             // If the modal flipped priority, re-settle the tier so it jumps
             // to the right section of the list like a direct star tap would.
