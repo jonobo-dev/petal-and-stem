@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Trash2, Flower2, X, Pencil, Minus, Leaf, Search, Loader2, Tag, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Clock, ArrowLeftRight, ArrowUp, Download, Upload, Copy, ClipboardPaste, Check, AlertCircle, Palette, Pipette, CalendarDays, ChevronLeft, ChevronRight, CircleDollarSign, CalendarPlus, BellRing, Settings, BellOff, AlertTriangle, Sheet, ExternalLink, Wifi, WifiOff, RotateCw, CreditCard, Banknote, Wallet, LayoutGrid, List } from 'lucide-react';
+import { Plus, Trash2, Flower2, X, Pencil, Minus, Leaf, Search, Loader2, Tag, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Clock, ArrowLeftRight, ArrowUp, Download, Upload, Copy, ClipboardPaste, Check, AlertCircle, Palette, Pipette, CalendarDays, ChevronLeft, ChevronRight, CircleDollarSign, CalendarPlus, BellRing, Settings, BellOff, AlertTriangle, Sheet, ExternalLink, Wifi, WifiOff, RotateCw, CreditCard, Banknote, Wallet, LayoutGrid, List, Star } from 'lucide-react';
 import { storage } from './idb.js';
 import * as sheets from './sheets.js';
 import * as drive from './drive.js';
@@ -8941,6 +8941,7 @@ function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
   const initial = parse(item.label || '');
   const [name, setName] = useState(initial.name);
   const [qty, setQty] = useState(initial.qty);
+  const [priority, setPriority] = useState(!!item.priority);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const handleSave = () => {
@@ -8948,7 +8949,7 @@ function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
     if (!cleanName) return;
     const cleanQty = Math.max(1, parseInt(qty) || 1);
     const nextLabel = cleanQty > 1 ? `${cleanQty} ${cleanName}` : cleanName;
-    onSave({ label: nextLabel });
+    onSave({ label: nextLabel, priority });
   };
 
   return (
@@ -9017,6 +9018,23 @@ function ShoppingItemEditModal({ item, onSave, onDelete, onClose }) {
               }}><Plus size={16} strokeWidth={2.6} /></button>
           </div>
         </div>
+
+        <button type="button" onClick={() => setPriority(p => !p)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            padding: '10px 12px', borderRadius: '10px',
+            background: priority ? `${C.gold}14` : 'transparent',
+            border: `1px solid ${priority ? C.gold + '66' : C.borderSoft}`,
+            color: priority ? C.ink : C.inkSoft,
+            fontFamily: 'inherit', fontSize: '13px', fontWeight: 500,
+            cursor: 'pointer', textAlign: 'left',
+          }}>
+          <Star size={16} strokeWidth={2} fill={priority ? C.gold : 'none'} color={priority ? C.gold : C.inkFaint} />
+          <span style={{ flex: 1 }}>Mark as priority</span>
+          <span style={{ fontSize: '11px', color: C.inkFaint }}>
+            {priority ? 'On · grabs first' : 'Off'}
+          </span>
+        </button>
 
         <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
           {confirmingDelete ? (
@@ -9230,14 +9248,21 @@ function TripCard({
     reorderItems(parsed.map(p => p.it));
   };
 
-  // "Priority" = what matters most to grab first: unchecked items tied to
-  // upcoming customer orders first (restock-linked), then other unchecked,
-  // then checked at the bottom. Within each bucket we preserve the user's
-  // current order so earlier drag tweaks aren't clobbered.
+  // "Priority" tiers, top to bottom:
+  //   0 — starred & unbought (her explicit "grab this first" flag)
+  //   1 — unbought and tied to an upcoming customer order
+  //   2 — unbought, no priority signal
+  //   3 — already bought (dropped to the bottom regardless)
+  // Within each tier we preserve the current order so prior drag tweaks
+  // aren't clobbered.
   const sortPriority = () => {
     const scored = (trip.items || []).map((it, idx) => {
-      let tier = 2;
-      if (!it.checked) tier = Array.isArray(it.forOrderIds) && it.forOrderIds.length > 0 ? 0 : 1;
+      let tier = 3;
+      if (!it.checked) {
+        if (it.priority) tier = 0;
+        else if (Array.isArray(it.forOrderIds) && it.forOrderIds.length > 0) tier = 1;
+        else tier = 2;
+      }
       return { it, tier, idx };
     });
     scored.sort((a, b) => a.tier - b.tier || a.idx - b.idx);
@@ -9384,9 +9409,20 @@ function TripCard({
   // check/price edits (only the first underlying item got toggled, and
   // the input had to be read-only to stay consistent). Individual rows
   // are simpler; she can still filter by customer if the list gets long.
-  const visibleItems = useMemo(() =>
-    filteredItems.map(it => ({ ...it, _ids: [it.id] }))
-  , [filteredItems]);
+  // Always surface "what's still to grab" at the top and "already bought"
+  // at the bottom, with her starred must-grabs above the rest. Stable sort
+  // preserves manual drag order within each tier.
+  const visibleItems = useMemo(() => {
+    const tierOf = (it) => {
+      if (it.checked) return 2;
+      if (it.priority) return 0;
+      return 1;
+    };
+    return filteredItems
+      .map((it, idx) => ({ it: { ...it, _ids: [it.id] }, tier: tierOf(it), idx }))
+      .sort((a, b) => a.tier - b.tier || a.idx - b.idx)
+      .map(x => x.it);
+  }, [filteredItems]);
 
   // Complete-trip with unchecked items: show a confirmation modal unless the
   // user has previously checked "don't show again" (stored in localStorage).
@@ -9771,6 +9807,27 @@ function TripCard({
                   marginTop: '4px',
                 }}>
                 {it.checked && <Check size={14} strokeWidth={3} color={C.card} />}
+              </button>
+              {/* Priority star — tap to flag a must-grab item. Filled gold when
+                  set; outlined and faint otherwise. Drives the Priority sort. */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUpdateItem(trip.id, it.id, { priority: !it.priority });
+                }}
+                aria-label={it.priority ? 'Unmark priority' : 'Mark as priority'}
+                title={it.priority ? 'Priority — tap to clear' : 'Mark as priority'}
+                style={{
+                  width: '24px', height: '24px', padding: 0,
+                  background: 'transparent', border: 'none',
+                  cursor: 'pointer', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  marginTop: '4px',
+                  color: it.priority ? C.gold : C.inkFaint,
+                  opacity: it.priority ? 1 : 0.45,
+                  transition: 'opacity 140ms ease, color 140ms ease',
+                }}>
+                <Star size={15} strokeWidth={2} fill={it.priority ? C.gold : 'none'} />
               </button>
               <div
                 onClick={() => setEditingItemId(it.id)}
