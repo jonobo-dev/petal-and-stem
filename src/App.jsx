@@ -45,6 +45,33 @@ const DEFAULT_MATERIAL_TYPES = [
 // Back-compat alias for components that read the type list before settings were threaded.
 const MATERIAL_TYPES = DEFAULT_MATERIAL_TYPES;
 
+// Common florist flower and supply names used as typeahead fallback — so
+// typing "Li" suggests "Lily" even when her catalog doesn't have Lily yet.
+// She can pick one to add as a trip row; no catalog entry is created unless
+// she does so explicitly from the Add-to-trip overlay.
+const COMMON_FLOWER_NAMES = [
+  'Alstroemeria', 'Amaryllis', 'Anemone', 'Anthurium', 'Aster',
+  "Baby's breath", 'Bells of Ireland', 'Bird of paradise', 'Bouvardia',
+  'Calla lily', 'Camellia', 'Carnation', 'Chrysanthemum', 'Clematis',
+  'Cornflower', 'Cosmos', 'Daffodil', 'Dahlia', 'Daisy', 'Delphinium',
+  'Dianthus', 'Dusty miller', 'Eucalyptus', 'Ferns', 'Forget-me-not',
+  'Foxglove', 'Freesia', 'Gardenia', 'Gerbera', 'Gladiolus', 'Heather',
+  'Hibiscus', 'Hyacinth', 'Hydrangea', 'Iris', 'Ivy', 'Jasmine',
+  'Larkspur', 'Lavender', 'Liatris', 'Lilac', 'Lily', 'Lily of the valley',
+  'Lisianthus', 'Magnolia', 'Marigold', 'Mum', 'Narcissus', 'Nigella',
+  'Orchid', 'Pansy', 'Peony', 'Phlox', 'Pincushion', 'Poppy', 'Protea',
+  "Queen Anne's lace", 'Ranunculus', 'Rose', 'Ruscus', 'Salal',
+  'Scabiosa', 'Snapdragon', 'Solidago', 'Statice', 'Stephanotis', 'Stock',
+  'Sunflower', 'Sweet pea', 'Sweet William', 'Thistle', 'Tulip',
+  'Veronica', 'Violet', 'Waxflower', 'Yarrow', 'Zinnia',
+];
+const COMMON_SUPPLY_NAMES = [
+  'Bouquet holder', 'Cellophane', 'Chicken wire', 'Corsage magnet',
+  'Floral foam', 'Floral tape', 'Flower food', 'Greening pins', 'Oasis',
+  'Pins', 'Raffia', 'Ribbon', 'Tape', 'Twine', 'Vase', 'Water tubes',
+  'Wire', 'Wrapping paper',
+];
+
 const DEFAULT_PAYMENT_METHODS = [
   { key: 'venmo', label: 'Venmo', color: '#3D95CE' },
   { key: 'paypal', label: 'PayPal', color: '#1546A0' },
@@ -9381,11 +9408,38 @@ function TripCard({
       return a.name.localeCompare(b.name);
     });
   }, [flowers, materials]);
+  // Typeahead pool: her catalog + any common florist name she hasn't added
+  // yet, flagged with isSuggestion so the UI can style/label them. Dictionary
+  // rows only show while she's actively typing, so an empty input still lists
+  // just her catalog.
+  const typeaheadOptions = useMemo(() => {
+    const catNames = new Set(catalogOptions.map(o => o.name.toLowerCase()));
+    const dict = [];
+    for (const name of COMMON_FLOWER_NAMES) {
+      if (!catNames.has(name.toLowerCase())) {
+        dict.push({ kind: 'flower', name, hint: '/bunch', price: null, isSuggestion: true });
+      }
+    }
+    for (const name of COMMON_SUPPLY_NAMES) {
+      if (!catNames.has(name.toLowerCase())) {
+        dict.push({ kind: 'material', name, hint: 'each', price: null, isSuggestion: true });
+      }
+    }
+    return [...catalogOptions, ...dict];
+  }, [catalogOptions]);
   const filteredOptions = useMemo(() => {
     const q = newItemLabel.trim().toLowerCase();
     if (!q) return catalogOptions;
-    return catalogOptions.filter(o => o.name.toLowerCase().includes(q));
-  }, [catalogOptions, newItemLabel]);
+    // Rank starts-with matches above contains-matches so "Li" surfaces "Lily"
+    // before "Calla lily". Cap to 12 rows to keep the popover scannable.
+    const ranked = typeaheadOptions
+      .filter(o => o.name.toLowerCase().includes(q))
+      .map(o => ({ o, starts: o.name.toLowerCase().startsWith(q) ? 0 : 1 }))
+      .sort((a, b) => a.starts - b.starts || a.o.name.localeCompare(b.o.name))
+      .slice(0, 12)
+      .map(x => x.o);
+    return ranked;
+  }, [catalogOptions, typeaheadOptions, newItemLabel]);
   useEffect(() => {
     if (!pickerOpen) return;
     const onDoc = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
@@ -10066,21 +10120,24 @@ function TripCard({
                 No catalog match. Hit Enter to add "{newItemLabel.trim()}".
               </div>
             ) : filteredOptions.map(opt => (
-              <button key={`${opt.kind}:${opt.name}`} type="button"
+              <button key={`${opt.kind}:${opt.name}${opt.isSuggestion ? ':sug' : ''}`} type="button"
                 onClick={() => addCatalogItem(opt)}
                 style={{
                   width: '100%', padding: '9px 12px', background: 'transparent',
                   border: 'none', borderRadius: '7px',
-                  fontFamily: 'inherit', fontSize: '14px', color: C.ink,
+                  fontFamily: 'inherit', fontSize: '14px',
+                  color: opt.isSuggestion ? C.inkSoft : C.ink,
                   cursor: 'pointer', textAlign: 'left',
                   display: 'flex', alignItems: 'center', gap: '8px',
                 }}>
                 {opt.kind === 'flower'
-                  ? <Flower2 size={13} strokeWidth={2} color={C.sageDeep} />
+                  ? <Flower2 size={13} strokeWidth={2} color={opt.isSuggestion ? C.inkFaint : C.sageDeep} />
                   : <Tag size={13} strokeWidth={2} color={C.inkSoft} />}
-                <span style={{ flex: 1, minWidth: 0 }}>{opt.name}</span>
+                <span style={{ flex: 1, minWidth: 0, fontStyle: opt.isSuggestion ? 'italic' : 'normal' }}>{opt.name}</span>
                 <span style={{ fontSize: '11px', color: C.inkFaint }}>
-                  {opt.hint}{typeof opt.price === 'number' ? ` · $${opt.price.toFixed(2)}` : ''}
+                  {opt.isSuggestion
+                    ? 'suggestion'
+                    : `${opt.hint}${typeof opt.price === 'number' ? ` · $${opt.price.toFixed(2)}` : ''}`}
                 </span>
               </button>
             ))}
