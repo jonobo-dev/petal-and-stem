@@ -10493,6 +10493,10 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
     });
     const monthSpent = thisMonth.reduce((s, t) => s + tripTotal(t), 0);
     const monthAvg = thisMonth.length > 0 ? monthSpent / thisMonth.length : 0;
+    // Lifetime total across every completed trip — the running "total cost"
+    // that lets her compare this month against the big-picture spend.
+    const allTimeSpent = completed.reduce((s, t) => s + tripTotal(t), 0);
+    const allTimeTrips = completed.length;
     // Store rollup across all completed trips — which stores she uses and
     // how much she typically drops at each. Trips with multiple store tags
     // attribute their total evenly across the tags (simple split).
@@ -10518,6 +10522,8 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
       monthTrips: thisMonth.length,
       monthSpent,
       monthAvg,
+      allTimeSpent,
+      allTimeTrips,
       stores,
       anyCompleted: completed.length > 0,
     };
@@ -10550,6 +10556,19 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
               across {stats.monthTrips} trip{stats.monthTrips === 1 ? '' : 's'}
             </div>
           </div>
+          {stats.allTimeTrips > stats.monthTrips && (
+            <div style={{
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              gap: '8px', fontSize: '11px', color: C.inkFaint,
+              paddingTop: '6px', borderTop: `1px solid ${C.borderSoft}`,
+            }}>
+              <span style={{ letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>All time</span>
+              <span>
+                <span style={{ color: C.inkSoft, fontWeight: 600 }}>${stats.allTimeSpent.toFixed(2)}</span>
+                {' '}across {stats.allTimeTrips} trip{stats.allTimeTrips === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
           {stats.stores.length > 0 && (
             <div style={{
               display: 'flex', flexWrap: 'wrap', gap: '6px',
