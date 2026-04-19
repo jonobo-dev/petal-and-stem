@@ -9913,6 +9913,30 @@ function TripCard({
             </div>
           );
         })}
+        {/* End-of-list drop zone — lets her drag a row past the last item to
+            pin it to the bottom, since the per-row drop targets only cover
+            existing rows. Only shows a visible hint while a drag is active. */}
+        {draggingId && visibleItems.length > 0 && (
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              if (dropTargetId !== '__end__') setDropTargetId('__end__');
+            }}
+            onDragLeave={() => { if (dropTargetId === '__end__') setDropTargetId(null); }}
+            onDrop={(e) => { e.preventDefault(); handleDrop(null); }}
+            style={{
+              minHeight: '56px', marginTop: '4px',
+              border: `2px dashed ${dropTargetId === '__end__' ? C.sageDeep : C.borderSoft}`,
+              background: dropTargetId === '__end__' ? `${C.sageDeep}1a` : 'transparent',
+              borderRadius: '8px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '11px', color: C.inkFaint, fontStyle: 'italic',
+              transition: 'background 140ms ease, border-color 140ms ease',
+            }}>
+            Drop here to move to bottom
+          </div>
+        )}
         </div>
       </div>
 
