@@ -3620,29 +3620,58 @@ function TypeDropdown({ value, options, onChange, onAdd, showColor = false, plac
 //               richer rows with kind icon + subtitle (address or URL).
 function MultiTagDropdown({ values, options, onChange, onAdd, onDeleteOption, placeholder = 'Add tag…', storeEntries, addLabel = 'New tag', newPlaceholder = 'Store name', chipsBelow = false }) {
   const [open, setOpen] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const ref = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setAdding(false); } };
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setNewLabel(''); } };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
+  // Auto-focus the inline input every time the dropdown opens so she can
+  // type a store name immediately — no extra tap needed.
+  useEffect(() => {
+    if (open && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [open]);
+
   const selected = Array.isArray(values) ? values : [];
   const available = (options || []).filter(o => !selected.includes(o));
+  // Typeahead: existing tags matching what she's typed (case-insensitive).
+  // When the query is empty, show all available.
+  const q = newLabel.trim().toLowerCase();
+  const filteredAvailable = q
+    ? available.filter(o => o.toLowerCase().includes(q))
+    : available;
+  // Only offer "+ Add X" when her query doesn't exactly match an existing tag
+  // (selected or available), so Enter on a known name just selects it.
+  const exactMatch = q
+    ? [...selected, ...available].some(o => o.toLowerCase() === q)
+    : false;
+  const canCreate = !!onAdd && q.length > 0 && !exactMatch;
 
   const add = (val) => { onChange([...selected, val]); };
   const remove = (val) => { onChange(selected.filter(v => v !== val)); };
 
-  const handleAdd = () => {
+  const commitInput = () => {
     const label = newLabel.trim();
-    if (!label || !onAdd) return;
-    const tag = onAdd({ label });
-    if (tag && !selected.includes(tag)) add(tag);
-    setNewLabel(''); setAdding(false); setOpen(false);
+    if (!label) return;
+    // Prefer selecting an existing tag over creating a duplicate with different casing.
+    const match = available.find(o => o.toLowerCase() === label.toLowerCase());
+    if (match) {
+      add(match);
+      setNewLabel(''); setOpen(false);
+      return;
+    }
+    if (onAdd) {
+      const tag = onAdd({ label });
+      if (tag && !selected.includes(tag)) add(tag);
+      setNewLabel(''); setOpen(false);
+    }
   };
 
   const chipStrip = selected.length > 0 ? (
@@ -3696,87 +3725,71 @@ function MultiTagDropdown({ values, options, onChange, onAdd, onDeleteOption, pl
           boxShadow: '0 12px 32px rgba(42,53,40,0.18)',
           maxHeight: '280px', overflowY: 'auto', padding: '4px',
         }}>
-          {!adding ? (
-            <>
-              {available.length === 0 && (
-                <div style={{
-                  padding: '12px', fontSize: '12px', color: C.inkFaint, fontStyle: 'italic', textAlign: 'center',
-                }}>
-                  {selected.length > 0 ? 'All known tags already added.' : 'No tags yet.'}
-                </div>
-              )}
-              {available.map(opt => (
-                <div key={opt} style={{
-                  display: 'flex', alignItems: 'stretch', borderRadius: '7px', overflow: 'hidden',
-                }}>
-                  <button type="button"
-                    onClick={() => { add(opt); setOpen(false); }}
-                    style={{
-                      flex: 1, padding: '10px 12px', background: 'transparent',
-                      border: 'none', borderRadius: '7px',
-                      fontFamily: 'inherit', fontSize: '14px', color: C.ink,
-                      cursor: 'pointer', textAlign: 'left',
-                      display: 'flex', alignItems: 'center', gap: '8px',
-                    }}>
-                    <Plus size={13} strokeWidth={2} color={C.sageDeep} />
-                    {opt}
-                  </button>
-                  {onDeleteOption && (
-                    <button type="button"
-                      onClick={(e) => { e.stopPropagation(); onDeleteOption(opt); }}
-                      aria-label={`Delete ${opt}`}
-                      title={`Delete "${opt}"`}
-                      style={{
-                        padding: '0 12px', background: 'transparent', border: 'none',
-                        color: C.inkFaint, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', flexShrink: 0,
-                      }}><X size={13} strokeWidth={2} /></button>
-                  )}
-                </div>
-              ))}
-              {onAdd && (
-                <>
-                  {available.length > 0 && <div style={{ height: '1px', background: C.borderSoft, margin: '4px 8px' }} />}
-                  <button type="button" onClick={() => setAdding(true)}
-                    style={{
-                      width: '100%', padding: '10px 12px', background: 'transparent',
-                      border: 'none', borderRadius: '7px',
-                      fontFamily: 'inherit', fontSize: '13px', color: C.sageDeep, fontWeight: 600,
-                      cursor: 'pointer', textAlign: 'left',
-                      display: 'flex', alignItems: 'center', gap: '8px',
-                    }}>
-                    <Plus size={14} strokeWidth={2.4} /> New tag
-                  </button>
-                </>
-              )}
-            </>
-          ) : (
-            <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <input type="text" value={newLabel} autoFocus
-                onChange={(e) => setNewLabel(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAdding(false); }}
-                placeholder="Store name"
-                style={{
-                  width: '100%', padding: '10px', fontSize: '14px', fontFamily: 'inherit',
-                  background: C.bg, border: `1px solid ${C.border}`, borderRadius: '8px', color: C.ink,
-                }} />
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button type="button" onClick={() => { setAdding(false); setNewLabel(''); }}
-                  style={{
-                    flex: 1, padding: '8px', background: 'transparent', border: `1px solid ${C.border}`,
-                    borderRadius: '8px', fontFamily: 'inherit', fontSize: '12px', color: C.inkSoft, cursor: 'pointer',
-                  }}>Cancel</button>
-                <button type="button" onClick={handleAdd} disabled={!newLabel.trim()}
-                  style={{
-                    flex: 1, padding: '8px',
-                    background: newLabel.trim() ? C.sageDeep : C.bgDeep, border: 'none', borderRadius: '8px',
-                    fontFamily: 'inherit', fontSize: '12px',
-                    color: newLabel.trim() ? C.card : C.inkFaint, fontWeight: 600,
-                    cursor: newLabel.trim() ? 'pointer' : 'not-allowed',
-                  }}>Save</button>
-              </div>
+          {/* Typeahead input — auto-focused so she can start typing the moment
+              she opens the dropdown. Enter picks an existing match or creates
+              a new tag from what she's typed. Escape closes. */}
+          {onAdd && (
+            <input ref={inputRef} type="text" value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitInput(); }
+                else if (e.key === 'Escape') { setNewLabel(''); setOpen(false); }
+              }}
+              placeholder={newPlaceholder}
+              style={{
+                width: '100%', padding: '10px 12px', fontSize: '14px', fontFamily: 'inherit',
+                background: C.bg, border: `1px solid ${C.border}`, borderRadius: '8px',
+                color: C.ink, outline: 'none', marginBottom: '4px',
+              }} />
+          )}
+          {canCreate && (
+            <button type="button" onClick={commitInput}
+              style={{
+                width: '100%', padding: '10px 12px', background: 'transparent',
+                border: 'none', borderRadius: '7px',
+                fontFamily: 'inherit', fontSize: '13px', color: C.sageDeep, fontWeight: 600,
+                cursor: 'pointer', textAlign: 'left',
+                display: 'flex', alignItems: 'center', gap: '8px',
+              }}>
+              <Plus size={14} strokeWidth={2.4} /> Add &ldquo;{newLabel.trim()}&rdquo;
+            </button>
+          )}
+          {filteredAvailable.length === 0 && !canCreate && (
+            <div style={{
+              padding: '12px', fontSize: '12px', color: C.inkFaint, fontStyle: 'italic', textAlign: 'center',
+            }}>
+              {selected.length > 0 && !q ? 'All known tags already added.' : (q ? `No match for "${newLabel.trim()}".` : 'No tags yet.')}
             </div>
           )}
+          {filteredAvailable.map(opt => (
+            <div key={opt} style={{
+              display: 'flex', alignItems: 'stretch', borderRadius: '7px', overflow: 'hidden',
+            }}>
+              <button type="button"
+                onClick={() => { add(opt); setOpen(false); setNewLabel(''); }}
+                style={{
+                  flex: 1, padding: '10px 12px', background: 'transparent',
+                  border: 'none', borderRadius: '7px',
+                  fontFamily: 'inherit', fontSize: '14px', color: C.ink,
+                  cursor: 'pointer', textAlign: 'left',
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                }}>
+                <Plus size={13} strokeWidth={2} color={C.sageDeep} />
+                {opt}
+              </button>
+              {onDeleteOption && (
+                <button type="button"
+                  onClick={(e) => { e.stopPropagation(); onDeleteOption(opt); }}
+                  aria-label={`Delete ${opt}`}
+                  title={`Delete "${opt}"`}
+                  style={{
+                    padding: '0 12px', background: 'transparent', border: 'none',
+                    color: C.inkFaint, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', flexShrink: 0,
+                  }}><X size={13} strokeWidth={2} /></button>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -10567,9 +10580,12 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
           mounts; falls back to a reasonable default until measurement lands. */}
       {onRestock && (
         <button onClick={onRestock} style={{
+          // Solid background so content scrolling behind the sticky banner
+          // doesn't bleed through. Card cream + subtle sage accent via the
+          // border reads as a callout without being see-through.
           position: 'sticky', top: 'var(--chrome-h, 156px)', zIndex: 20,
-          padding: '14px 16px', background: `${C.sage}1f`,
-          border: `1px solid ${C.sage}88`, borderRadius: '12px',
+          padding: '14px 16px', background: C.card,
+          border: `1px solid ${C.sage}`, borderRadius: '12px',
           color: C.ink, fontFamily: 'inherit', cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'left',
           boxShadow: '0 6px 16px rgba(42,53,40,0.08)',
