@@ -1932,6 +1932,32 @@ export default function App() {
       ? { ...s, status: 'done', completedAt: new Date().toISOString() }
       : s));
   };
+  // Clones a past (or scheduled) trip into a fresh scheduled trip for today:
+  // same items + store tags, everything unchecked, no completion stamp. Lets
+  // her re-shop a recurring list with one tap.
+  const duplicateShoppingTrip = (sourceId) => {
+    const source = shopping.find(x => x.id === sourceId);
+    if (!source) return;
+    const cloned = {
+      id: `shop-${Date.now()}`,
+      name: source.name ? `${source.name} (again)` : 'Repeat trip',
+      storeTags: Array.isArray(source.storeTags) ? [...source.storeTags] : [],
+      extraCustomers: Array.isArray(source.extraCustomers) ? [...source.extraCustomers] : [],
+      items: (source.items || []).map((it, i) => ({
+        ...it,
+        id: `si-${Date.now()}-${i}`,
+        checked: false,
+      })),
+      notes: source.notes || '',
+      scheduledFor: todayDateStr(),
+      status: 'scheduled',
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+    };
+    saveShopping([...shopping, cloned]);
+    showToast(`Scheduled a repeat trip with ${cloned.items.length} item${cloned.items.length === 1 ? '' : 's'}.`, 'success');
+  };
+
   const deleteShoppingSession = (id) => {
     const s = shopping.find(x => x.id === id);
     if (!s) return;
@@ -2544,8 +2570,10 @@ export default function App() {
             onRemoveItem={removeShoppingItem}
             onComplete={completeShoppingSession}
             onDelete={deleteShoppingSession}
+            onDuplicate={duplicateShoppingTrip}
             onCreateFlower={quickCreateFlower}
             onCreateMaterial={quickCreateMaterial}
+            showToast={showToast}
           />
         ) : (
           <OrdersView
@@ -9201,8 +9229,37 @@ function TripCard({
   knownStoreTags, onAddStoreTag, onDeleteStoreTag,
   onUpdate, onAddItem, onUpdateItem, onRemoveItem,
   onComplete, onStartScheduled, onDelete, onCancelActive,
-  onCreateFlower, onCreateMaterial,
+  onCreateFlower, onCreateMaterial, showToast,
 }) {
+  // Build a plain-text version of the still-to-buy list and ship it to the
+  // clipboard (or the native share sheet where available). Lets her dump the
+  // list into SMS/Messages/Notes for a helper in two taps. Skips checked rows
+  // since those are already in the cart.
+  const shareList = async () => {
+    const unchecked = (trip.items || []).filter(it => !it.checked);
+    if (unchecked.length === 0) {
+      showToast && showToast('Nothing unchecked to share.', 'error');
+      return;
+    }
+    const title = trip.name || 'Shopping list';
+    const lines = unchecked.map(it => {
+      const lbl = (it.label || '').trim();
+      return lbl ? `• ${lbl}` : null;
+    }).filter(Boolean);
+    const text = `${title}\n${lines.join('\n')}`;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title, text });
+        return;
+      }
+    } catch {}
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast && showToast(`Copied ${lines.length} item${lines.length === 1 ? '' : 's'} to clipboard.`, 'success');
+    } catch {
+      showToast && showToast('Could not share the list on this device.', 'error');
+    }
+  };
   const [newItemLabel, setNewItemLabel] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
@@ -9469,6 +9526,19 @@ function TripCard({
             }} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+          {(trip.items || []).some(it => !it.checked) && (
+            <button onClick={shareList}
+              title="Copy the unchecked list to share with a helper"
+              aria-label="Share shopping list"
+              style={{
+                padding: '8px', borderRadius: '8px',
+                background: 'transparent', border: 'none',
+                color: C.inkSoft, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+              <Upload size={14} strokeWidth={2} />
+            </button>
+          )}
           <TripReminderControl trip={trip} onUpdate={onUpdate} />
           <DeleteButton onConfirm={() => onDelete(trip.id)} label={isActive ? 'Discard trip' : 'Delete scheduled trip'} compact />
         </div>
@@ -10375,7 +10445,7 @@ function CompleteTripWarning({ uncheckedCount, totalCount, onCancel, onConfirm }
   );
 }
 
-function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, orders, settings, knownStoreTags, onAddStoreTag, onDeleteStoreTag, onStart, onSchedule, onStartScheduled, onCancelActive, onRestock, onUpdate, onAddItem, onUpdateItem, onRemoveItem, onComplete, onDelete, onCreateFlower, onCreateMaterial }) {
+function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, orders, settings, knownStoreTags, onAddStoreTag, onDeleteStoreTag, onStart, onSchedule, onStartScheduled, onCancelActive, onRestock, onUpdate, onAddItem, onUpdateItem, onRemoveItem, onComplete, onDelete, onDuplicate, onCreateFlower, onCreateMaterial, showToast }) {
   // Live list of customer names with upcoming orders within the restock
   // horizon. Threaded into every TripCard so the rail reflects current
   // pickups even on trips created before extraCustomers was tracked.
@@ -10395,8 +10465,102 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
   }, [orders, settings?.restockHorizonDays]);
   const [showPast, setShowPast] = useState(false);
 
+  // Aggregate stats across completed trips: spend this month + which stores
+  // she leans on most, with an avg per trip at each. Small tracking footprint,
+  // derived purely from existing trip data.
+  const stats = useMemo(() => {
+    const now = new Date();
+    const m = now.getMonth(), y = now.getFullYear();
+    const tripTotal = (t) => (t.items || []).reduce((s, it) =>
+      s + (typeof it.price === 'number' ? it.price : 0), 0);
+    const completed = (past || []).filter(t => t.status === 'done');
+    const thisMonth = completed.filter(t => {
+      const d = t.completedAt ? new Date(t.completedAt) : null;
+      return d && d.getMonth() === m && d.getFullYear() === y;
+    });
+    const monthSpent = thisMonth.reduce((s, t) => s + tripTotal(t), 0);
+    const monthAvg = thisMonth.length > 0 ? monthSpent / thisMonth.length : 0;
+    // Store rollup across all completed trips — which stores she uses and
+    // how much she typically drops at each. Trips with multiple store tags
+    // attribute their total evenly across the tags (simple split).
+    const byStore = new Map();
+    for (const t of completed) {
+      const tags = Array.isArray(t.storeTags) && t.storeTags.length > 0 ? t.storeTags : [];
+      if (tags.length === 0) continue;
+      const total = tripTotal(t);
+      const share = total / tags.length;
+      for (const tag of tags) {
+        const cur = byStore.get(tag) || { trips: 0, spent: 0 };
+        cur.trips += 1;
+        cur.spent += share;
+        byStore.set(tag, cur);
+      }
+    }
+    const stores = Array.from(byStore.entries())
+      .map(([name, v]) => ({ name, trips: v.trips, spent: v.spent, avg: v.trips > 0 ? v.spent / v.trips : 0 }))
+      .sort((a, b) => b.trips - a.trips)
+      .slice(0, 3);
+    return {
+      monthLabel: now.toLocaleString('en-US', { month: 'long' }),
+      monthTrips: thisMonth.length,
+      monthSpent,
+      monthAvg,
+      stores,
+      anyCompleted: completed.length > 0,
+    };
+  }, [past]);
+
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {stats.anyCompleted && (
+        <div style={{
+          background: C.card, border: `1px solid ${C.borderSoft}`, borderRadius: '12px',
+          padding: '12px 14px',
+          display: 'flex', flexDirection: 'column', gap: '10px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px' }}>
+            <div style={{
+              fontSize: '10px', fontWeight: 600, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: C.inkFaint,
+            }}>{stats.monthLabel} so far</div>
+            {stats.monthTrips > 0 && (
+              <div style={{ fontSize: '11px', color: C.inkFaint }}>
+                avg ${stats.monthAvg.toFixed(2)}/trip
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+            <div className="serif" style={{ fontSize: '26px', fontWeight: 500, color: C.ink, letterSpacing: '-0.01em', lineHeight: 1 }}>
+              ${stats.monthSpent.toFixed(2)}
+            </div>
+            <div style={{ fontSize: '12px', color: C.inkSoft }}>
+              across {stats.monthTrips} trip{stats.monthTrips === 1 ? '' : 's'}
+            </div>
+          </div>
+          {stats.stores.length > 0 && (
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: '6px',
+              paddingTop: '8px', borderTop: `1px solid ${C.borderSoft}`,
+            }}>
+              {stats.stores.map(s => (
+                <div key={s.name} title={`${s.trips} trip${s.trips === 1 ? '' : 's'} · $${s.spent.toFixed(2)} total`}
+                  style={{
+                    padding: '4px 10px', borderRadius: '999px',
+                    background: `${C.sage}14`, border: `1px solid ${C.sage}55`,
+                    fontSize: '11px', color: C.inkSoft,
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                  }}>
+                  <span style={{ fontWeight: 600, color: C.ink }}>{s.name}</span>
+                  <span>·</span>
+                  <span>${s.avg.toFixed(0)} avg</span>
+                  <span style={{ color: C.inkFaint }}>({s.trips})</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Auto-restock banner — pinned below the app chrome so she can tap it
           from anywhere in the Shopping tab even when an active trip pushes
           the list down. --chrome-h is set by the App once the sticky chrome
@@ -10464,6 +10628,7 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
               onRemoveItem={onRemoveItem} onComplete={onComplete} onDelete={onDelete}
               onCancelActive={onCancelActive}
               onCreateFlower={onCreateFlower} onCreateMaterial={onCreateMaterial}
+              showToast={showToast}
             />
           )}
 
@@ -10498,6 +10663,7 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
                     onUpdate={onUpdate} onAddItem={onAddItem} onUpdateItem={onUpdateItem}
                     onRemoveItem={onRemoveItem} onStartScheduled={onStartScheduled} onDelete={onDelete}
                     onCreateFlower={onCreateFlower} onCreateMaterial={onCreateMaterial}
+              showToast={showToast}
                   />
                 ))}
               </div>
@@ -10557,7 +10723,23 @@ function ShoppingView({ active, scheduled, past, flowers, materials, bouquets, o
                         </div>
                       )}
                     </div>
-                    <DeleteButton onConfirm={() => onDelete(s.id)} label="Delete trip" compact size={14} padding="8px" />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                      {onDuplicate && (s.items || []).length > 0 && (
+                        <button onClick={() => onDuplicate(s.id)}
+                          title="Schedule a repeat trip with the same items"
+                          aria-label="Shop again"
+                          style={{
+                            padding: '6px 10px', fontSize: '11px', fontWeight: 600,
+                            background: 'transparent', border: `1px solid ${C.borderSoft}`,
+                            borderRadius: '6px', color: C.inkSoft,
+                            fontFamily: 'inherit', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '4px',
+                          }}>
+                          <Copy size={12} strokeWidth={2} /> Shop again
+                        </button>
+                      )}
+                      <DeleteButton onConfirm={() => onDelete(s.id)} label="Delete trip" compact size={14} padding="8px" />
+                    </div>
                   </div>
                 </div>
               ))}
