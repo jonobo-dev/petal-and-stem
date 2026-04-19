@@ -9233,6 +9233,29 @@ function TripCard({
     onUpdate(trip.id, { items: nextItems });
   };
 
+  // Tier = 0 (priority unchecked), 1 (plain unchecked), 2 (checked). Used to
+  // place a row at the end of its tier after a check/star toggle, so toggles
+  // still "bump" the row into the right section without clobbering drag
+  // order elsewhere.
+  const tierOf = (it) => it.checked ? 2 : (it.priority ? 0 : 1);
+  const toggleWithTierSettle = (itemId, patch) => {
+    const items = [...(trip.items || [])];
+    const idx = items.findIndex(x => x.id === itemId);
+    if (idx < 0) return;
+    const updated = { ...items[idx], ...patch };
+    const rest = items.filter(x => x.id !== itemId);
+    const updTier = tierOf(updated);
+    // Insert at the END of the updated item's tier (last position where
+    // neighbor's tier is <= updTier).
+    let insertIdx = 0;
+    for (let i = 0; i < rest.length; i++) {
+      if (tierOf(rest[i]) <= updTier) insertIdx = i + 1;
+      else break;
+    }
+    rest.splice(insertIdx, 0, updated);
+    onUpdate(trip.id, { items: rest });
+  };
+
   // Sort by parsed noun (ignoring qty prefix) so "4 Roses" sits next to
   // "Roses" alphabetically. Checked items drop below unchecked regardless of
   // name — she cares most about what's still to buy.
@@ -9409,20 +9432,13 @@ function TripCard({
   // check/price edits (only the first underlying item got toggled, and
   // the input had to be read-only to stay consistent). Individual rows
   // are simpler; she can still filter by customer if the list gets long.
-  // Always surface "what's still to grab" at the top and "already bought"
-  // at the bottom, with her starred must-grabs above the rest. Stable sort
-  // preserves manual drag order within each tier.
-  const visibleItems = useMemo(() => {
-    const tierOf = (it) => {
-      if (it.checked) return 2;
-      if (it.priority) return 0;
-      return 1;
-    };
-    return filteredItems
-      .map((it, idx) => ({ it: { ...it, _ids: [it.id] }, tier: tierOf(it), idx }))
-      .sort((a, b) => a.tier - b.tier || a.idx - b.idx)
-      .map(x => x.it);
-  }, [filteredItems]);
+  // Render in stored order — drag reorders win. Tier changes (check / star)
+  // re-settle the row via settleTierAfterToggle below, so toggling still
+  // bumps a row up or down, but otherwise the user's manual drag order
+  // stays exactly as she left it.
+  const visibleItems = useMemo(() =>
+    filteredItems.map(it => ({ ...it, _ids: [it.id] }))
+  , [filteredItems]);
 
   // Complete-trip with unchecked items: show a confirmation modal unless the
   // user has previously checked "don't show again" (stored in localStorage).
@@ -9795,7 +9811,7 @@ function TripCard({
                 opacity: isDragging ? 0.4 : 1,
                 transition: 'background 140ms ease, opacity 140ms ease',
               }}>
-              <button onClick={() => onUpdateItem(trip.id, it.id, { checked: !it.checked })}
+              <button onClick={() => toggleWithTierSettle(it.id, { checked: !it.checked })}
                 aria-label={it.checked ? 'Mark not bought' : 'Mark bought'}
                 style={{
                   width: '24px', height: '24px', borderRadius: '50%',
@@ -9813,7 +9829,7 @@ function TripCard({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onUpdateItem(trip.id, it.id, { priority: !it.priority });
+                  toggleWithTierSettle(it.id, { priority: !it.priority });
                 }}
                 aria-label={it.priority ? 'Unmark priority' : 'Mark as priority'}
                 title={it.priority ? 'Priority — tap to clear' : 'Mark as priority'}
@@ -10165,7 +10181,15 @@ function TripCard({
         <ShoppingItemEditModal
           item={editingItem}
           onSave={(patch) => {
-            onUpdateItem(trip.id, editingItem.id, patch);
+            // If the modal flipped priority, re-settle the tier so it jumps
+            // to the right section of the list like a direct star tap would.
+            const priorityChanged = ('priority' in patch)
+              && (!!patch.priority !== !!editingItem.priority);
+            if (priorityChanged) {
+              toggleWithTierSettle(editingItem.id, patch);
+            } else {
+              onUpdateItem(trip.id, editingItem.id, patch);
+            }
             setEditingItemId(null);
           }}
           onDelete={() => {
