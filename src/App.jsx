@@ -9256,42 +9256,6 @@ function TripCard({
     onUpdate(trip.id, { items: rest });
   };
 
-  // Sort by parsed noun (ignoring qty prefix) so "4 Roses" sits next to
-  // "Roses" alphabetically. Checked items drop below unchecked regardless of
-  // name — she cares most about what's still to buy.
-  const sortAZ = () => {
-    const parsed = (trip.items || []).map(it => ({
-      it,
-      noun: (parseLabel(it.label || '').noun || it.label || '').trim().toLowerCase(),
-    }));
-    parsed.sort((a, b) => {
-      if (!!a.it.checked !== !!b.it.checked) return a.it.checked ? 1 : -1;
-      return a.noun.localeCompare(b.noun);
-    });
-    reorderItems(parsed.map(p => p.it));
-  };
-
-  // "Priority" tiers, top to bottom:
-  //   0 — starred & unbought (her explicit "grab this first" flag)
-  //   1 — unbought and tied to an upcoming customer order
-  //   2 — unbought, no priority signal
-  //   3 — already bought (dropped to the bottom regardless)
-  // Within each tier we preserve the current order so prior drag tweaks
-  // aren't clobbered.
-  const sortPriority = () => {
-    const scored = (trip.items || []).map((it, idx) => {
-      let tier = 3;
-      if (!it.checked) {
-        if (it.priority) tier = 0;
-        else if (Array.isArray(it.forOrderIds) && it.forOrderIds.length > 0) tier = 1;
-        else tier = 2;
-      }
-      return { it, tier, idx };
-    });
-    scored.sort((a, b) => a.tier - b.tier || a.idx - b.idx);
-    reorderItems(scored.map(s => s.it));
-  };
-
   // Drop handler — moves the dragged row to just before the drop target,
   // or to the end if targetId is null. No-op if the dragged row would
   // land in the same spot.
@@ -9582,33 +9546,10 @@ function TripCard({
            tap "All" or a customer to scope the visible list. The underlying
            data is unchanged; this is purely a view filter. */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: '6px', flexShrink: 0, gap: '8px',
-      }}>
-        <div style={{
-          fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
-          textTransform: 'uppercase', color: C.inkFaint,
-        }}>To buy</div>
-        {(trip.items || []).length > 1 && (
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <button type="button" onClick={sortAZ}
-              title="Sort A–Z" aria-label="Sort A–Z"
-              style={{
-                padding: '4px 8px', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em',
-                background: 'transparent', border: `1px solid ${C.borderSoft}`,
-                borderRadius: '6px', color: C.inkSoft, fontFamily: 'inherit', cursor: 'pointer',
-              }}>A–Z</button>
-            <button type="button" onClick={sortPriority}
-              title="Sort by priority — orders first, checked last"
-              aria-label="Sort by priority"
-              style={{
-                padding: '4px 8px', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em',
-                background: 'transparent', border: `1px solid ${C.borderSoft}`,
-                borderRadius: '6px', color: C.inkSoft, fontFamily: 'inherit', cursor: 'pointer',
-              }}>Priority</button>
-          </div>
-        )}
-      </div>
+        fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
+        textTransform: 'uppercase', color: C.inkFaint, marginBottom: '6px',
+        flexShrink: 0,
+      }}>To buy</div>
       <div className="restock-grid" style={{
         display: 'grid',
         // Slim customer rail (~25%) so the actual checklist gets the room.
